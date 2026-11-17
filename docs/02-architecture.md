@@ -22,12 +22,13 @@ ring/
     ring-storage/         # 대용량 오브젝트/에셋 스토리지 바인딩 및 단기 서명 URL/검증
     ring-adapter-http/    # 외부 호환 어댑터: HTTP/JSON (hyperish/docs 03 규약 구현)
     ring-adapter-ws/      # 외부 호환 어댑터: WebSocket / WebTransport (hyperish/docs 04 규약 구현)
+    ring-adapter-lace/    # `lace` 웹 빌드 산출물의 프로덕션 서빙 및 SSR 통합 어댑터
 ```
 
 ## 2. 계층 의존 방향과 `hyper` 코어(`ref`) 수직화
 
 ```
-[ ring-adapter-http / ring-adapter-ws / 스토리지·DB 드라이버 ]
+[ ring-adapter-http / ring-adapter-ws / ring-adapter-lace / 스토리지·DB 드라이버 ]
                              │
                              ▼ (단방향 의존)
        [ ring-core / ring-db / ring-cache / ring-msa / ring-realtime ]
@@ -37,5 +38,5 @@ ring/
 ```
 
 - **코어 무오염 원칙**: `ring-core`와 비즈니스 서비스 코드는 외부 전송 규약(HTTP 헤더, JSON 문자열, 특정 클라우드 바인딩 타입)을 직접 다루지 않고 `hyper`의 모델·오류·취소 계약을 기준으로 동작합니다.
-- **내부 포크 + `unit optimization`**:
-  - 고성능 비동기 HTTP/QUIC(WebTransport) 서버, 쿼리 엔진/풀러, 직렬화 브리지 등 성능 임계 경로에 있는 생태계 크레이트는 내부 포크 후 `hyper-core` / `hyper-serde`와 제로카피로 맞물리도록 `unit optimization`을 수행합니다(`hyperish/docs` `05-development-rules.md` §7).
+- **내부 포크 + 단계적 `unit optimization`**:
+  - 고성능 비동기 HTTP/QUIC(WebTransport) 서버, 쿼리 엔진/풀러, 직렬화 브리지 등 성능 임계 경로에 있는 생태계 크레이트는 내부 포크 후 (1단계) 불필요한 범용 추상화·미사용 피처를 제거해 `hyper-core` / `hyper-serde`와 제로카피로 직결하고, (2단계) 프로파일링 병목 구간에 한해 메모리 레이아웃·SIMD 등 심화 개조를 수행합니다(`hyperish/docs` `05-development-rules.md` §7).
