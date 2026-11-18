@@ -17,7 +17,7 @@ ring/
     ring-auth/            # 세션 쿠키+CSRF, Bearer/토큰 인증, RBAC 권한 가드(`AuthGuard`), 즉시 철회 검증
     ring-db/              # ORM/쿼리 빌더, 커넥션 풀, 트랜잭션, 마이그레이션 (`hyper` 모델 직결)
     ring-cache/           # 인메모리·분산 캐시, 멱등 키 저장소, 레이트리미터(`RateLimit`)
-    ring-openapi/         # `hyper-api`·`hyper-validate` 스키마 수집 및 Swagger/OpenAPI 자동 서빙(`.openapi("/docs")`)
+    ring-openapi/         # `hyper`의 범용 스키마와 `ring` 라우트를 HTTP OpenAPI(Swagger) 규격으로 변환·서빙(`.openapi("/docs")`)
     ring-msa/             # 서비스 간 내부 통신(RPC/이벤트 버스), 분산 트레이싱, 헬스체크
     ring-realtime/        # WebSocket(WS) 및 WebTransport(WT) 룸·프레즌스·seq 상태 조정자
     ring-jobs/            # 백그라운드 워커, 지연/반복 작업 큐, 실패 재시도·보상(SAGA) 관리
