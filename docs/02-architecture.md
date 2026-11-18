@@ -21,7 +21,7 @@ ring/
     ring-msa/             # 서비스 간 내부 통신(`hyper-serde` 바이너리 RPC/이벤트 버스), 분산 트레이싱, 헬스체크
     ring-realtime/        # WebTransport(QUIC) 및 WebSocket(WS) 룸·프레즌스·seq 상태 조정자
     ring-jobs/            # 백그라운드 작업 큐(지연·재시도·DLQ), `@every`/Cron 스케줄러, 보상(SAGA) 관리
-    ring-notify/          # 이메일(SMTP/API), 모바일·웹 푸시(APNs/FCM), HMAC 서명 검증 외부 웹훅 게이트웨이
+    ring-notify/          # 이메일(SMTP/API), 모바일·웹 푸시(APNs Live Activity / FCM), HMAC 서명 검증 외부 웹훅 게이트웨이
     ring-storage/         # 로컬/S3/R2 대용량 스토리지 바인딩, Presigned 멀티파트 업로드 및 무결성 검증
     ring-adapter-http/    # 외부 표준 레일(HTTP/JSON, 03 규약) 및 내부 고속 레일(`hyper-serde` 바이너리) 어댑터
     ring-adapter-ws/      # WebTransport(HTTP/3 QUIC) 우선 연결 + WebSocket(04 규약) 자동 폴백 실시간 어댑터
