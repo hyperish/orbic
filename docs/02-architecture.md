@@ -11,11 +11,13 @@ ring/
   apps/
     ring-bench/           # 백엔드 처리량·지연시간·룸 동시성 벤치마크 및 검증 러너
   crates/
-    ring/                 # 사용자 진입 크레이트 (단일 의존성 재수출 + prelude)
-    ring-core/            # 애플리케이션 컨텍스트, 수명주기, 미들웨어/레이어, 권한·취소 파이프
-    ring-macros/          # 라우트, 서비스, 모델, 워커, 룸 선언용 proc macro
-    ring-db/              # DB 커넥션·트랜잭션·마이그레이션·쿼리 추상화 + 드라이버 어댑터
-    ring-cache/           # 인메모리·분산 캐시, 멱등 키 저장소, 레이트리미터
+    ring/                 # 사용자 진입 크레이트 (단일 의존성 재수출 + prelude + TestClient)
+    ring-core/            # BackendComponent 트리(`provide`, `wrap`, `mount`), 컨텍스트(`Ctx<T>`), 미들웨어, 취소 파이프
+    ring-macros/          # 라우트·컴포넌트·모델·워커·룸 보조 proc macro
+    ring-auth/            # 세션 쿠키+CSRF, Bearer/토큰 인증, RBAC 권한 가드(`AuthGuard`), 즉시 철회 검증
+    ring-db/              # ORM/쿼리 빌더, 커넥션 풀, 트랜잭션, 마이그레이션 (`hyper` 모델 직결)
+    ring-cache/           # 인메모리·분산 캐시, 멱등 키 저장소, 레이트리미터(`RateLimit`)
+    ring-openapi/         # `hyper-api`·`hyper-validate` 스키마 수집 및 Swagger/OpenAPI 자동 서빙(`.openapi("/docs")`)
     ring-msa/             # 서비스 간 내부 통신(RPC/이벤트 버스), 분산 트레이싱, 헬스체크
     ring-realtime/        # WebSocket(WS) 및 WebTransport(WT) 룸·프레즌스·seq 상태 조정자
     ring-jobs/            # 백그라운드 워커, 지연/반복 작업 큐, 실패 재시도·보상(SAGA) 관리
