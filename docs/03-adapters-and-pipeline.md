@@ -16,10 +16,11 @@
 
 ## 2. 호환 어댑터 구성
 
-| 영역 | 코어 추상화 (`ring-*`) | 호환 어댑터 역할 |
+| 영역 | 코어 추상화 (`ring-*`) | 호환 어댑터 및 동작 방식 |
 |---|---|---|
-| **외부 API** | `hyper-api` + `ring-core` | **HTTP/JSON 어댑터**(`hyperish/docs` `03-api-protocol.md` 준수: 커서 페이지네이션, `expectedVersion` 낙관적 잠금, CSRF·쿠키/Bearer 인증, `RateLimit-*` 헤더) |
-| **실시간 (WS / WT)** | `ring-realtime` (`seq`, 룸 상태, 중복 제거) | **WebSocket 어댑터**(`hyperish/docs` `04-realtime-communication.md` 준수: `?ticket=` 단기 일회용 티켓, `seq` 재연결 복구, 휴면 자동 응답) 및 **WebTransport(HTTP/3 QUIC) 어댑터** |
-| **MSA 내부 통신** | `ring-msa` + `hyper-serde` | 서비스 간 고성능 바이너리/제로카피 RPC 및 메시지 브로커 어댑터 |
-| **`lace` 웹 서빙** | `ring-adapter-lace` | `lace`가 산출한 정적 에셋 매니페스트(`LaceBundleManifest`), 라우트 메타데이터, `lace-ssr` 스트리밍 핸들러(`LaceSsrHandler`)를 받아 프로덕션 서빙. 요청별 권한 검증·캐시 제어·취소 토큰 전파(연결 종료 시 SSR 스트림 즉시 drop) 및 매니페스트 버전 호환 검증은 `ring`이 책임짐 (`lace/docs/03-adapters-and-pipeline.md` §3 참조) |
-| **DB / Cache / Storage** | `ring-db`, `ring-cache`, `ring-storage` | 관계형/임베디드 DB 드라이버(Postgres, SQLite/D1 등), 인메모리/분산 캐시, S3/R2 호환 대용량 오브젝트 스토리지(무결성 검증 후 활성화) 어댑터 |
+| **Dual-Rail API 전송** | `hyper-api` + `ring-core` | • **표준 레일**: 외부 호환용 **HTTP/JSON** (`hyperish/docs` `03-api-protocol.md` 준수: 커서 페이지네이션, `expectedVersion` 낙관적 잠금, `RateLimit-*` 헤더)<br>• **고속 레일**: `lace` ↔ `ring` 인라인 서버 함수 및 MSA 호출 시 **`hyper-serde` 제로카피 바이너리** 직결 및 클라이언트 언마운트 시 종단 간 취소(`CancellationToken`) 전파 |
+| **Dual-Rail 실시간 (WT / WS)** | `ring-realtime` (`seq`, 룸 상태, 중복 제거) | **WebTransport(HTTP/3 QUIC 다중 스트림·데이터그램)**를 1순위로 연결하고, QUIC/UDP가 차단된 네트워크에서는 **WebSocket**(`04-realtime-communication.md`: `?ticket=` 단기 일회용 티켓, `seq` 재연결 복구, 휴면 자동 응답)으로 자동 폴백 |
+| **인증·세션 (`ring-auth`)** | `ring-auth` + `ring-cache` | 웹(`HttpOnly` 쿠키 + `X-CSRF-Token`)과 네이티브/CLI(`Bearer` 토큰) 이중 전송 어댑터. 서버는 `ring-cache`(L1/L2)의 Opaque 세션을 조회해 로그아웃·권한 회수 시 즉시 차단 보장 |
+| **DB & Cache** | `ring-db`, `ring-cache` | **PostgreSQL** 및 **SQLite/LibSQL** 드라이버 어댑터(`#[table]` 체이닝 + `sql!` 매크로), **L1 인메모리(`Moka` 계열) + L2 `Redis/Valkey`** Tiered 캐시 어댑터(Singleflight·태그 무효화) |
+| **Storage · Jobs · Notify** | `ring-storage`, `ring-jobs`, `ring-notify` | 로컬/S3/R2 멀티파트 업로드(크기·체크섬 검증 후 활성화), 지연·재시도·DLQ 작업 큐 및 Cron 스케줄러, 이메일·푸시(APNs/FCM)·HMAC 웹훅 어댑터 |
+| **`lace` 웹 서빙** | `ring-adapter-lace` | `lace`가 산출한 정적 에셋 매니페스트(`LaceBundleManifest`), 라우트 메타데이터, `lace-web-ssr` 스트리밍 핸들러(`LaceSsrHandler`)를 받아 프로덕션 서빙 (`lace/docs/03-adapters-and-pipeline.md` §3 참조) |
