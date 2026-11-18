@@ -12,13 +12,24 @@
   - 입력 타입에 `Valid<T>`(`hyper-validate`)를 쓰면 핸들러 진입 전에 자동 검증되고 실패 시 `400 invalid_request`가 반환됩니다.
   - 컴포넌트에 등록된 핸들러와 `Valid<T>` 스키마는 자동으로 OpenAPI 트리에 수집되어 `.openapi("/docs")`로 서빙됩니다.
 
-### 백엔드 컴포넌트 & 인메모리 TestClient 스케치 (제안)
+### 백엔드 컴포넌트 · DB 투트랙 쿼리 · 캐시 · 인메모리 TestClient 스케치 (제안)
 
 ```rust
 use hyper::prelude::*;
 use ring::prelude::*;
 
-// 1) hyper 모델: 직렬화 + 프론트/백엔드 공용 Validation + Swagger 스키마가 한 번에 도출됨
+// 1) hyper 모델 + DB 테이블 직결 (별도 ORM 엔티티 보일러플레이트 없음)
+#[model]
+#[table("projects")]
+pub struct Project {
+    #[pk] pub id: Id<Project>,
+    pub owner_id: Id<User>,
+    #[validate(len = 1..=80)]
+    pub title: String,
+    pub is_public: bool,
+    pub version: i64,
+}
+
 #[model]
 pub struct CreateProjectInput {
     #[validate(len = 1..=80)]
@@ -26,25 +37,61 @@ pub struct CreateProjectInput {
     pub is_public: bool,
 }
 
-// 2) 도메인 컴포넌트: 개발자가 원하는 폴더/모듈 구조로 자유롭게 설계 후 조립
+// 2) 도메인 컴포넌트: 상태·가드·라우트·실시간 룸·Cron 워커를 한 단위로 캡슐화
 pub fn project_component() -> BackendComponent {
     component()
         .wrap(AuthGuard::require_user())
         .wrap(RateLimit::per_minute(60))
         .post("/projects", create_project)
-        .get("/projects/{id}", get_project)
+        .get("/projects", list_projects)
         .room("/projects/{id}/live", project_live_room)
+        .every("1h", cleanup_orphan_uploads)
+}
+
+// 3) DB 체이닝 + 컴파일 타임 sql! 매크로 + L1/L2 Singleflight 캐시 활용
+async fn list_projects(
+    db: Ctx<Db>,
+    cache: Ctx<Cache>,
+    user: Ctx<CurrentUser>,
+    cursor: Query<CursorParams>,
+) -> RingResult<Page<Project>> {
+    // Singleflight: 동시 캐시 미스 시 DB 쿼리는 단 1회만 실행
+    cache.get_or_try_init(
+        key!("projects", user.id, cursor.after),
+        ttl!("30s"),
+        || async {
+            db.query::<Project>()
+                .where_eq(Project::OWNER_ID, user.id)
+                .cursor_after(cursor.after.clone(), 50)
+                .fetch_page()
+                .await
+        },
+    ).await
 }
 
 async fn create_project(
     db: Ctx<Db>,
+    cache: Ctx<Cache>,
     user: Ctx<CurrentUser>,
     input: Valid<CreateProjectInput>,
-) -> RingResult<ProjectSummary> {
-    db.insert_project(user.id, input.into_inner()).await
+) -> RingResult<Project> {
+    let created = db.tx(|tx| async move {
+        let data = input.into_inner();
+        sql!(
+            Project,
+            "INSERT INTO projects (id, owner_id, title, is_public, version)
+             VALUES ($1, $2, $3, $4, 1) RETURNING *",
+            Id::new(), user.id, data.title, data.is_public
+        )
+        .fetch_one(tx)
+        .await
+    }).await?;
+
+    cache.invalidate_tag(tag!("projects", user.id)).await?;
+    Ok(created)
 }
 
-// 3) 루트 앱 조립 (단일 서버 모놀리식부터 MSA 분리까지 조립만 바꾸면 끝)
+// 4) 루트 앱 조립 및 포트 없는 인메모리 TestClient 검증
 pub fn app(db: Db, cache: Cache) -> RingApp {
     RingApp::new()
         .provide(db)
@@ -53,7 +100,6 @@ pub fn app(db: Db, cache: Cache) -> RingApp {
         .mount("/v1", project_component())
 }
 
-// 4) Request Test Client: 네트워크 포트 없이 컴포넌트를 인메모리로 즉시 검증
 #[hyper::test]
 async fn create_project_rejects_empty_title() {
     let client = TestClient::new(app(Db::in_memory().await, Cache::in_memory()));
