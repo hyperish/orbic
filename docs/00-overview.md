@@ -8,16 +8,27 @@
 
 `ring`은 고정된 폴더 구조를 강제하지 않는 **Rust 스타일 컴포넌트(`BackendComponent`) 조립 아키텍처** 위에서 백엔드 개발과 운영에 필요한 도메인 전반을 다룹니다:
 
-1. **컴포넌트 기반 아키텍처 & 미들웨어(`ring-core`)**:
+1. **컴포넌트 기반 아키텍처 & 운영 안전장치 (`ring-core`)**:
    - 상태·의존성 주입(`provide`/`Ctx<T>`), 미들웨어·가드 래핑(`wrap`), 라우트 핸들러, 실시간 룸, 백그라운드 워커를 도메인/기능 단위의 `BackendComponent`로 묶어 조립(`.mount()`)합니다.
-   - 1인 개발자의 단일 파일 구성부터 대규모 팀의 DDD·헥사고날·MSA 분리까지 개발자가 아키텍처를 직접 설계할 수 있도록 고점을 높입니다.
-2. **데이터베이스(DB) & ORM 쿼리 (`ring-db`)**: 스키마 정의, 마이그레이션, 타입 안전 ORM/쿼리 빌더, 트랜잭션과 커밋/보상 지점 관리(`hyper` 모델과 매핑 보일러플레이트 없이 직결).
-3. **캐시(Cache) & 상태 조정 (`ring-cache`)**: 인메모리·분산 캐시 계층, 세션·레이트리밋 상태, 멱등 키(Idempotency-Key) 보관소.
-4. **인증·권한 (Auth & Guard — `ring-auth`)**: 쿠키 세션+CSRF, Bearer/토큰 인증, RBAC 권한 가드(`AuthGuard`), 요청별 접근 권한 검증·철회 즉시 반영(`hyperish/docs` `02-core-contracts.md` §6).
-5. **Swagger/OpenAPI 변환·서빙 & 인메모리 `TestClient` (`ring` 전용)**:
-   - OpenAPI/Swagger는 HTTP 백엔드 도메인 규격이므로 `hyper`가 아닌 `ring`(`ring-openapi`)이 전담합니다. `ring`은 `hyper` 모델의 범용 스키마(`#[validate]`)와 `ring` 핸들러 시그니처를 읽어 OpenAPI 문서로 변환하고 `.openapi("/docs")` 한 줄로 서빙합니다.
-   - `TestClient::new(app)`로 실제 네트워크 포트를 띄우지 않고도 컴포넌트/앱 전체에 요청을 보내 응답과 DB 상태를 즉시 검증합니다.
-6. **MSA · 실시간 통신 (WS / WT) · `lace` 프로덕션 서빙**: 서비스 간 고속 내부 RPC/메시지 버스(`ring-msa`), WebSocket/WebTransport 실시간 룸·`seq` 조율(`ring-realtime`), 백그라운드 작업 큐(`ring-jobs`), 그리고 [`lace`](https://github.com/hyperish/lace) 웹 빌드의 프로덕션 서빙·SSR 호스팅(`ring-adapter-lace`).
+   - CORS 화이트리스트, 보안 헤더(CSP, HSTS), 요청 크기 제한(`413`), 헬스체크(`/health`), 메트릭(`/metrics`), 진행 중인 트랜잭션·요청 완료 후 닫는 **Graceful Shutdown**을 기본 내장합니다.
+2. **데이터베이스(DB) & SQL 투트랙 쿼리 (`ring-db`)**:
+   - 별도 ORM 엔티티 보일러플레이트 없이 `hyper`의 `#[model]` 구조체에 `#[table("...")]`만 붙여 직결합니다.
+   - **경량 타입 안전 체이닝**(일상적인 CRUD·동적 필터·커서 페이지네이션)과 **컴파일 타임 스키마 검증 `sql!` 매크로**(복잡한 조인·집계·튜닝 쿼리 탈출구) 투트랙을 제공하며, **PostgreSQL**과 **SQLite / LibSQL**을 1급 지원합니다.
+   - `db.tx(...)` 클로저 기반 트랜잭션과 요청 `CancellationToken` 발동 시 자동 롤백을 내장합니다.
+3. **계층형 캐시 서버 (`ring-cache`)**:
+   - **In-Memory(`Moka` 계열 L1)**, **Redis / Valkey(RESP3 파이프라이닝 L2)**, 그리고 읽기는 L1에서 처리하고 쓰기/삭제 시 Redis Pub/Sub·Invalidation으로 L1을 자동 무효화하는 **Tiered(L1+L2) 캐시**를 지원합니다.
+   - 캐시 만료 시 동시 DB 폭주(Stampede)를 막는 **Singleflight(`get_or_try_init`)**, **태그(`tag!`) 기반 일괄 무효화**, 멱등 키(`Idempotency-Key`) 보관소 및 분산 레이트리미터(`RateLimit`)를 기본 내장합니다.
+4. **플랫폼 통합 세션 · 쿠키 · 인증 (`ring-auth`)**:
+   - **웹(`lace-web`)**은 `HttpOnly + Secure + SameSite=Lax` 쿠키 + `X-CSRF-Token` 검증으로, **네이티브(`lace-native`)·CLI**는 OS 보안 키체인 기반 `Bearer` 토큰으로 전송하되 핸들러는 동일한 `Ctx<CurrentUser>`로 주입받습니다.
+   - 즉시 철회(`02-core-contracts.md` §6)를 보장하기 위해 Stateless JWT 대신 `ring-cache`(L1/L2) 기반 고엔트로피 **불투명 세션(Opaque Session)**을 기본으로 채택하며, 슬라이딩 연장 및 리프레시 토큰 회전(재사용 감지 시 전체 폐기)을 내장합니다.
+5. **Dual-Rail 네트워크 · 인라인 서버 함수 · Swagger & `TestClient`**:
+   - **표준 호환 레일**: 외부 호환용 HTTPS/JSON + WebSocket(`03`, `04` 규약 준수) 및 `.openapi("/docs")` Swagger 자동 서빙.
+   - **수직 통합 고속 레일**: `lace` ↔ `ring` 및 `ring` 내부 MSA 간 통신은 **`hyper-serde` 제로카피 바이너리 + WebTransport(QUIC, UDP 차단 시 WS 자동 폴백)**로 직결하며, 프론트에서 백엔드 핸들러를 일반 Rust 비동기 함수처럼 부르는 **인라인 서버 함수 호출**과 종단 간 취소 전파를 지원합니다.
+6. **파일 스토리지(`ring-storage`) · 잡 큐/Cron(`ring-jobs`) · 외부 알림/웹훅(`ring-notify`) · `lace` 서빙**:
+   - 로컬 디스크 및 S3 / Cloudflare R2 추상화, Presigned 멀티파트 이어 올리기(`upload-parts`) 및 크기·체크섬 검증 후 활성화.
+   - 지연 작업·지수 백오프 재시도·데드레터 큐(DLQ) 워커 및 `@every` / Cron 주기적 스케줄러.
+   - 이메일(SMTP/API)·모바일/웹 푸시(APNs/FCM) 발송 어댑터 및 외부 웹훅 수신 시 HMAC 서명 검증.
+   - [`lace`](https://github.com/hyperish/lace) 웹 빌드의 프로덕션 서빙·SSR 호스팅(`ring-adapter-lace`).
 
 ## 2. 레퍼런스와 구현 전략 (확정)
 
