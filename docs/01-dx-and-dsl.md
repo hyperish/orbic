@@ -1,45 +1,73 @@
-# 01. DX 및 DSL 설계 (ring)
+# 01. DX 및 컴포넌트 설계 (ring)
 
-> 상태: `loco.rs` 및 Dioxus 매크로 레퍼런스는 **확정**, 구체 매크로 문법은 **제안/미정** · 기준일: 2026-11-17
+> 상태: Rust 스타일 컴포넌트 조립 아키텍처·`loco.rs` 도메인 생산성·개발 생산성 중심 표현 개방성은 **확정**, 세부 API 시그니처는 **제안** · 기준일: 2026-11-18
 
-`ring`의 DX 목표는 **`loco.rs`처럼 백엔드에 필요한 모든 부품(DB, 캐시, 워커, 실시간 룸, MSA)이 처음부터 제자리에 준비되어 있으면서**, Dioxus 매크로 스타일의 선언적 DSL로 읽기 쉽고 안전하게 작성하는 것입니다.
+`ring`의 DX 목표는 **`loco.rs`처럼 백엔드에 필요한 모든 부품(ORM/Query, Cache, Auth, Middleware, 워커, 실시간 룸, Swagger, TestClient)이 처음부터 준비되어 있으면서**, 고정된 폴더 구조를 강요하지 않고 **깔끔한 Rust 스타일 컴포넌트(`BackendComponent`)로 개발자가 원하는 아키텍처를 직접 조립**하게 하는 것입니다.
 
-## 1. 생산성 중심 백엔드 표현 원칙 (확정)
+## 1. Rust 스타일 백엔드 컴포넌트 아키텍처 (확정)
 
-- **DSL은 개발 생산성을 위한 수단**: 어트리뷰트·선언 매크로 DSL을 쓰는 이유는 오직 개발 생산성 때문이며, 순수 Rust 빌더·트레이트·코드젠 등 **생산성과 가독성이 충족되거나 더 효율적인 방법이 있다면 어떤 방법을 사용해도 무관**합니다.
-- **한눈에 읽히는 서비스·리소스 정의**: 엔드포인트, 권한 조건, 멱등성 여부, 트랜잭션 경계, 캐시 정책을 간결하게 표현합니다.
-- **컴파일 타임 스키마·쿼리·계약 검증**: `hyper-api` 계약과 핸들러 시그니처가 어긋나거나, 모델 필드·마이그레이션 타입이 맞지 않으면 컴파일 타임에 진단합니다.
-- **Rust 탈출구 보장**: 복잡한 쿼리, 커스텀 소켓 제어, 저수준 스트리밍이 필요할 때는 언제든 하위 `ring_core` / `ring_db` / `ring_realtime` Rust API로 직접 내려갈 수 있습니다.
+- **개념을 묶는 단위로서의 Component**: 라우트, 의존성 상태(`provide`), 미들웨어/권한 가드(`wrap`), 실시간 룸(`room`), 백그라운드 워커를 도메인별 `BackendComponent`로 묶습니다.
+- **깔끔한 독립 Rust 핸들러 함수**: JS 프레임워크식의 깊은 인라인 클로저 중첩 대신, 가독성 높은 일반 `async fn` 핸들러와 타입 추출자(`Ctx<Db>`, `Ctx<CurrentUser>`, `Valid<Input>`)로 비즈니스 로직을 깔끔하게 분리합니다.
+- **검증(Validation) · Swagger · TestClient 자동 연동**:
+  - 입력 타입에 `Valid<T>`(`hyper-validate`)를 쓰면 핸들러 진입 전에 자동 검증되고 실패 시 `400 invalid_request`가 반환됩니다.
+  - 컴포넌트에 등록된 핸들러와 `Valid<T>` 스키마는 자동으로 OpenAPI 트리에 수집되어 `.openapi("/docs")`로 서빙됩니다.
 
-### 개념 스케치 (제안 — 구체 문법은 미정)
+### 백엔드 컴포넌트 & 인메모리 TestClient 스케치 (제안)
 
 ```rust
 use hyper::prelude::*;
 use ring::prelude::*;
 
-#[ring::service(api = ProjectService)]
-pub struct ProjectBackend {
-    #[inject] db: DbPool,
-    #[inject] cache: CacheClient,
+// 1) hyper 모델: 직렬화 + 프론트/백엔드 공용 Validation + Swagger 스키마가 한 번에 도출됨
+#[model]
+pub struct CreateProjectInput {
+    #[validate(len = 1..=80)]
+    pub title: String,
+    pub is_public: bool,
 }
 
-#[ring::routes]
-impl ProjectBackend {
-    #[get("/v1/projects/{id}", auth = RequireViewer, cache_ttl = "30s")]
-    pub async fn get_project(&self, ctx: &RequestCtx, id: Id<Project>) -> RingResult<ProjectSummary> {
-        self.cache
-            .get_or_try_init(&id, || self.db.find_project(ctx.cancel_token(), id))
-            .await
-    }
+// 2) 도메인 컴포넌트: 개발자가 원하는 폴더/모듈 구조로 자유롭게 설계 후 조립
+pub fn project_component() -> BackendComponent {
+    component()
+        .wrap(AuthGuard::require_user())
+        .wrap(RateLimit::per_minute(60))
+        .post("/projects", create_project)
+        .get("/projects/{id}", get_project)
+        .room("/projects/{id}/live", project_live_room)
 }
 
-#[ring::room("projects/{id}")]
-pub mod project_room {
-    // WS / WebTransport 공통 룸 핸들러 (seq 단조 증가 및 재연결 복구 내장)
+async fn create_project(
+    db: Ctx<Db>,
+    user: Ctx<CurrentUser>,
+    input: Valid<CreateProjectInput>,
+) -> RingResult<ProjectSummary> {
+    db.insert_project(user.id, input.into_inner()).await
+}
+
+// 3) 루트 앱 조립 (단일 서버 모놀리식부터 MSA 분리까지 조립만 바꾸면 끝)
+pub fn app(db: Db, cache: Cache) -> RingApp {
+    RingApp::new()
+        .provide(db)
+        .provide(cache)
+        .openapi("/docs")
+        .mount("/v1", project_component())
+}
+
+// 4) Request Test Client: 네트워크 포트 없이 컴포넌트를 인메모리로 즉시 검증
+#[hyper::test]
+async fn create_project_rejects_empty_title() {
+    let client = TestClient::new(app(Db::in_memory().await, Cache::in_memory()));
+
+    let res = client
+        .post("/v1/projects")
+        .as_user(test_user())
+        .json(&CreateProjectInput { title: "".into(), is_public: false })
+        .send()
+        .await;
+
+    assert_eq!(res.status(), 400);
 }
 ```
-
-> 위 코드 블록은 `loco.rs` + `hyper` 매크로 결합 시의 사용성을 보여주는 스케치이며, 구체 문법은 [`04-open-questions.md`](04-open-questions.md)에서 확정합니다.
 
 ## 2. `hyper` CLI와 통합된 백엔드 개발 흐름
 
