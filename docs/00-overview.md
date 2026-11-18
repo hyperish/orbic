@@ -6,13 +6,18 @@
 
 ## 1. 확정된 역할과 도메인 범위
 
-`ring`은 백엔드 개발과 운영에 필요한 도메인 전반을 다룹니다:
+`ring`은 고정된 폴더 구조를 강제하지 않는 **Rust 스타일 컴포넌트(`BackendComponent`) 조립 아키텍처** 위에서 백엔드 개발과 운영에 필요한 도메인 전반을 다룹니다:
 
-1. **데이터베이스(DB) & 영속성**: 스키마 정의, 마이그레이션, 쿼리 빌딩, 트랜잭션과 커밋/보상 지점 관리, 오브젝트 스토리지 연동.
-2. **캐시(Cache) & 상태 조정**: 인메모리·분산 캐시 계층, 세션·레이트리밋 상태, 멱등 키(Idempotency-Key) 보관소.
-3. **MSA & 서비스 간 통신**: 서비스 디스커버리, 고성능 내부 RPC/메시지 버스, 백그라운드 워커·작업 큐, 분산 추적(`TraceId`/`RequestId`).
-4. **실시간 통신 (WS / WT)**: WebSocket(WS) 및 WebTransport(WT) 기반 양방향 스트리밍, 룸(Room)·프레즌스·시퀀스(`seq`) 상태 조율.
-5. **인증·권한·외부 API 및 `lace` 웹 프로덕션 서빙**: 세션·토큰 인증, 요청별 접근 권한 검증·철회 즉시 반영(`hyperish/docs` `02-core-contracts.md` §6), 그리고 [`lace`](https://github.com/hyperish/lace)가 빌드한 DOM/웹 출력물의 **프로덕션 서빙·SSR 호스팅**을 담당합니다(로컬 개발용 프리뷰/데브 서빙은 `lace` 자체 내장).
+1. **컴포넌트 기반 아키텍처 & 미들웨어(`ring-core`)**:
+   - 상태·의존성 주입(`provide`/`Ctx<T>`), 미들웨어·가드 래핑(`wrap`), 라우트 핸들러, 실시간 룸, 백그라운드 워커를 도메인/기능 단위의 `BackendComponent`로 묶어 조립(`.mount()`)합니다.
+   - 1인 개발자의 단일 파일 구성부터 대규모 팀의 DDD·헥사고날·MSA 분리까지 개발자가 아키텍처를 직접 설계할 수 있도록 고점을 높입니다.
+2. **데이터베이스(DB) & ORM 쿼리 (`ring-db`)**: 스키마 정의, 마이그레이션, 타입 안전 ORM/쿼리 빌더, 트랜잭션과 커밋/보상 지점 관리(`hyper` 모델과 매핑 보일러플레이트 없이 직결).
+3. **캐시(Cache) & 상태 조정 (`ring-cache`)**: 인메모리·분산 캐시 계층, 세션·레이트리밋 상태, 멱등 키(Idempotency-Key) 보관소.
+4. **인증·권한 (Auth & Guard — `ring-auth`)**: 쿠키 세션+CSRF, Bearer/토큰 인증, RBAC 권한 가드(`AuthGuard`), 요청별 접근 권한 검증·철회 즉시 반영(`hyperish/docs` `02-core-contracts.md` §6).
+5. **Swagger/OpenAPI 자동 서빙 & 인메모리 `TestClient`**:
+   - `hyper` 모델(`#[validate]`)과 핸들러 시그니처에서 추출된 스키마 메타데이터를 모아 `.openapi("/docs")` 한 줄로 인터랙티브 Swagger/OpenAPI 문서를 서빙합니다.
+   - `TestClient::new(app)`로 실제 네트워크 포트를 띄우지 않고도 컴포넌트/앱 전체에 요청을 보내 응답과 DB 상태를 즉시 검증합니다.
+6. **MSA · 실시간 통신 (WS / WT) · `lace` 프로덕션 서빙**: 서비스 간 고속 내부 RPC/메시지 버스(`ring-msa`), WebSocket/WebTransport 실시간 룸·`seq` 조율(`ring-realtime`), 백그라운드 작업 큐(`ring-jobs`), 그리고 [`lace`](https://github.com/hyperish/lace) 웹 빌드의 프로덕션 서빙·SSR 호스팅(`ring-adapter-lace`).
 
 ## 2. 레퍼런스와 구현 전략 (확정)
 
