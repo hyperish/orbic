@@ -21,5 +21,5 @@
 | **외부 API** | `hyper-api` + `ring-core` | **HTTP/JSON 어댑터**(`hyperish/docs` `03-api-protocol.md` 준수: 커서 페이지네이션, `expectedVersion` 낙관적 잠금, CSRF·쿠키/Bearer 인증, `RateLimit-*` 헤더) |
 | **실시간 (WS / WT)** | `ring-realtime` (`seq`, 룸 상태, 중복 제거) | **WebSocket 어댑터**(`hyperish/docs` `04-realtime-communication.md` 준수: `?ticket=` 단기 일회용 티켓, `seq` 재연결 복구, 휴면 자동 응답) 및 **WebTransport(HTTP/3 QUIC) 어댑터** |
 | **MSA 내부 통신** | `ring-msa` + `hyper-serde` | 서비스 간 고성능 바이너리/제로카피 RPC 및 메시지 브로커 어댑터 |
-| **`lace` 웹 서빙** | `ring-adapter-lace` | `lace`가 출력한 DOM/웹 정적 번들 및 SSR 스트림의 프로덕션 서빙 어댑터 (`lace` 자체는 DOM 구축과 로컬 데브 프리뷰까지만 담당하고 실제 프로덕션 서빙은 `ring`이 담당) |
+| **`lace` 웹 서빙** | `ring-adapter-lace` | `lace`가 산출한 정적 에셋 매니페스트(`LaceBundleManifest`), 라우트 메타데이터, `lace-ssr` 스트리밍 핸들러(`LaceSsrHandler`)를 받아 프로덕션 서빙. 요청별 권한 검증·캐시 제어·취소 토큰 전파(연결 종료 시 SSR 스트림 즉시 drop) 및 매니페스트 버전 호환 검증은 `ring`이 책임짐 (`lace/docs/03-adapters-and-pipeline.md` §3 참조) |
 | **DB / Cache / Storage** | `ring-db`, `ring-cache`, `ring-storage` | 관계형/임베디드 DB 드라이버(Postgres, SQLite/D1 등), 인메모리/분산 캐시, S3/R2 호환 대용량 오브젝트 스토리지(무결성 검증 후 활성화) 어댑터 |
