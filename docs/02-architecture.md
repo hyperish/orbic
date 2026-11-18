@@ -12,18 +12,19 @@ ring/
     ring-bench/           # 백엔드 처리량·지연시간·룸 동시성 벤치마크 및 검증 러너
   crates/
     ring/                 # 사용자 진입 크레이트 (단일 의존성 재수출 + prelude + TestClient)
-    ring-core/            # BackendComponent 트리(`provide`, `wrap`, `mount`), 컨텍스트(`Ctx<T>`), 미들웨어, 취소 파이프
-    ring-macros/          # 라우트·컴포넌트·모델·워커·룸 보조 proc macro
-    ring-auth/            # 세션 쿠키+CSRF, Bearer/토큰 인증, RBAC 권한 가드(`AuthGuard`), 즉시 철회 검증
-    ring-db/              # ORM/쿼리 빌더, 커넥션 풀, 트랜잭션, 마이그레이션 (`hyper` 모델 직결)
-    ring-cache/           # 인메모리·분산 캐시, 멱등 키 저장소, 레이트리미터(`RateLimit`)
+    ring-core/            # BackendComponent 트리(`provide`, `wrap`, `mount`), `Ctx<T>`, 보안 헤더·CORS·Graceful Shutdown
+    ring-macros/          # 라우트·컴포넌트·테이블(`#[table]`)·`sql!`·워커·룸 보조 proc macro
+    ring-auth/            # 웹(HttpOnly 쿠키+CSRF) & 네이티브/CLI(Bearer) 통합 Opaque 세션, RBAC `AuthGuard`, 즉시 철회
+    ring-db/              # 경량 타입 안전 체이닝 + 컴파일 타임 `sql!` 매크로, 커넥션 풀, 트랜잭션, 마이그레이션 (Postgres, SQLite/LibSQL)
+    ring-cache/           # L1(인메모리) + L2(Redis/Valkey) Tiered 캐시, Singleflight, 태그 무효화, 멱등 키, `RateLimit`
     ring-openapi/         # `hyper`의 범용 스키마와 `ring` 라우트를 HTTP OpenAPI(Swagger) 규격으로 변환·서빙(`.openapi("/docs")`)
-    ring-msa/             # 서비스 간 내부 통신(RPC/이벤트 버스), 분산 트레이싱, 헬스체크
-    ring-realtime/        # WebSocket(WS) 및 WebTransport(WT) 룸·프레즌스·seq 상태 조정자
-    ring-jobs/            # 백그라운드 워커, 지연/반복 작업 큐, 실패 재시도·보상(SAGA) 관리
-    ring-storage/         # 대용량 오브젝트/에셋 스토리지 바인딩 및 단기 서명 URL/검증
-    ring-adapter-http/    # 외부 호환 어댑터: HTTP/JSON (hyperish/docs 03 규약 구현)
-    ring-adapter-ws/      # 외부 호환 어댑터: WebSocket / WebTransport (hyperish/docs 04 규약 구현)
+    ring-msa/             # 서비스 간 내부 통신(`hyper-serde` 바이너리 RPC/이벤트 버스), 분산 트레이싱, 헬스체크
+    ring-realtime/        # WebTransport(QUIC) 및 WebSocket(WS) 룸·프레즌스·seq 상태 조정자
+    ring-jobs/            # 백그라운드 작업 큐(지연·재시도·DLQ), `@every`/Cron 스케줄러, 보상(SAGA) 관리
+    ring-notify/          # 이메일(SMTP/API), 모바일·웹 푸시(APNs/FCM), HMAC 서명 검증 외부 웹훅 게이트웨이
+    ring-storage/         # 로컬/S3/R2 대용량 스토리지 바인딩, Presigned 멀티파트 업로드 및 무결성 검증
+    ring-adapter-http/    # 외부 표준 레일(HTTP/JSON, 03 규약) 및 내부 고속 레일(`hyper-serde` 바이너리) 어댑터
+    ring-adapter-ws/      # WebTransport(HTTP/3 QUIC) 우선 연결 + WebSocket(04 규약) 자동 폴백 실시간 어댑터
     ring-adapter-lace/    # `lace` 웹 빌드 산출물의 프로덕션 서빙 및 SSR 통합 어댑터
 ```
 
