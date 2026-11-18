@@ -14,8 +14,8 @@
 2. **데이터베이스(DB) & ORM 쿼리 (`ring-db`)**: 스키마 정의, 마이그레이션, 타입 안전 ORM/쿼리 빌더, 트랜잭션과 커밋/보상 지점 관리(`hyper` 모델과 매핑 보일러플레이트 없이 직결).
 3. **캐시(Cache) & 상태 조정 (`ring-cache`)**: 인메모리·분산 캐시 계층, 세션·레이트리밋 상태, 멱등 키(Idempotency-Key) 보관소.
 4. **인증·권한 (Auth & Guard — `ring-auth`)**: 쿠키 세션+CSRF, Bearer/토큰 인증, RBAC 권한 가드(`AuthGuard`), 요청별 접근 권한 검증·철회 즉시 반영(`hyperish/docs` `02-core-contracts.md` §6).
-5. **Swagger/OpenAPI 자동 서빙 & 인메모리 `TestClient`**:
-   - `hyper` 모델(`#[validate]`)과 핸들러 시그니처에서 추출된 스키마 메타데이터를 모아 `.openapi("/docs")` 한 줄로 인터랙티브 Swagger/OpenAPI 문서를 서빙합니다.
+5. **Swagger/OpenAPI 변환·서빙 & 인메모리 `TestClient` (`ring` 전용)**:
+   - OpenAPI/Swagger는 HTTP 백엔드 도메인 규격이므로 `hyper`가 아닌 `ring`(`ring-openapi`)이 전담합니다. `ring`은 `hyper` 모델의 범용 스키마(`#[validate]`)와 `ring` 핸들러 시그니처를 읽어 OpenAPI 문서로 변환하고 `.openapi("/docs")` 한 줄로 서빙합니다.
    - `TestClient::new(app)`로 실제 네트워크 포트를 띄우지 않고도 컴포넌트/앱 전체에 요청을 보내 응답과 DB 상태를 즉시 검증합니다.
 6. **MSA · 실시간 통신 (WS / WT) · `lace` 프로덕션 서빙**: 서비스 간 고속 내부 RPC/메시지 버스(`ring-msa`), WebSocket/WebTransport 실시간 룸·`seq` 조율(`ring-realtime`), 백그라운드 작업 큐(`ring-jobs`), 그리고 [`lace`](https://github.com/hyperish/lace) 웹 빌드의 프로덕션 서빙·SSR 호스팅(`ring-adapter-lace`).
 
