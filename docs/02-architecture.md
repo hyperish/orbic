@@ -1,6 +1,6 @@
 # 02. 아키텍처와 크레이트 구조 (ring)
 
-> 상태: `apps/`·`crates/` 모노레포 및 `hyper` 코어 `ref` 구조는 **확정**, 세부 크레이트 분할은 **제안** · 기준일: 2026-11-17
+> 상태: `apps/`·`crates/` 모노레포 및 `hyper` 코어 `ref` 구조는 **확정**, 세부 크레이트 분할은 **제안** · 기준일: 2026-11-19
 
 `ring` 레포는 Cargo 워크스페이스 기반의 모노레포(`apps/`, `crates/`)로 구성합니다(`hyperish/docs`의 `05-development-rules.md` §1).
 
@@ -14,13 +14,13 @@ ring/
     ring/                 # 사용자 진입 크레이트 (단일 의존성 재수출 + prelude + TestClient)
     ring-core/            # BackendComponent 트리(`provide`, `wrap`, `mount`), `Ctx<T>`, 보안 헤더·CORS·Graceful Shutdown
     ring-macros/          # 라우트·컴포넌트·테이블(`#[table]`)·`sql!`·워커·룸 보조 proc macro
-    ring-auth/            # 웹(HttpOnly 쿠키+CSRF) & 네이티브/CLI(Bearer) 통합 Opaque 세션, RBAC `AuthGuard`, 즉시 철회
-    ring-db/              # 경량 타입 안전 체이닝 + 컴파일 타임 `sql!` 매크로, 커넥션 풀, 트랜잭션, 마이그레이션 (Postgres, SQLite/LibSQL)
+    ring-auth/            # 웹(HttpOnly 쿠키+CSRF) & 네이티브/CLI(Bearer) 통합 Opaque 세션, RBAC `AuthGuard`, L2 직결 즉시 철회
+    ring-db/              # 경량 타입 안전 체이닝 + 오프라인 검증 `sql!` 매크로, 커넥션 풀, 트랜잭션, 마이그레이션 (Postgres, SQLite/LibSQL)
     ring-cache/           # L1(인메모리) + L2(Redis/Valkey) Tiered 캐시, Singleflight, 태그 무효화, 멱등 키, `RateLimit`
     ring-openapi/         # `hyper`의 범용 스키마와 `ring` 라우트를 HTTP OpenAPI(Swagger) 규격으로 변환·서빙(`.openapi("/docs")`)
     ring-msa/             # 서비스 간 내부 통신(`hyper-serde` 바이너리 RPC/이벤트 버스), 분산 트레이싱, 헬스체크
     ring-realtime/        # WebTransport(QUIC) 및 WebSocket(WS) 룸·프레즌스·seq 상태 조정자
-    ring-jobs/            # 백그라운드 작업 큐(지연·재시도·DLQ), `@every`/Cron 스케줄러, 보상(SAGA) 관리
+    ring-jobs/            # 백그라운드 작업 큐(지연·재시도·DLQ), 분산 리더 락 기반 `.every`/Cron 스케줄러, 보상(SAGA) 관리
     ring-notify/          # 이메일(SMTP/API), 모바일·웹 푸시(APNs Live Activity / FCM), HMAC 서명 검증 외부 웹훅 게이트웨이
     ring-storage/         # 로컬/S3/R2 대용량 스토리지 바인딩, Presigned 멀티파트 업로드 및 무결성 검증
     ring-adapter-http/    # 외부 표준 레일(HTTP/JSON, 03 규약) 및 내부 고속 레일(`hyper-serde` 바이너리) 어댑터
