@@ -118,7 +118,36 @@ async fn create_project_rejects_empty_title() {
 }
 ```
 
-## 2. `hyve` CLI와 통합된 백엔드 개발 흐름
+## 2. 인라인 서버 함수(`#[server]`) ↔ `BackendComponent` 결합 계약 (확정, 2026-11-19)
+
+`serge` 프론트엔드에서 백엔드 핸들러를 일반 Rust 비동기 함수처럼 호출할 때도 **숨겨진 전역 자동 등록을 금지**합니다.
+
+- **서버 빌드(`feature = "server"`)**: `#[server(POST "/projects")]`는 원본 핸들러와 라우트 디스크립터를 남겨 `orbic::component().wrap(AuthGuard::require_user()).handle(create_project)`로 **명시 등록**합니다(권한 가드·레이트리밋·`/v1` 마운트·OpenAPI·`TestClient` 100% 일관 적용).
+- **클라이언트 빌드(`!feature = "server"`)**: `#[server_ctx]` 추출자(`Ctx<Db>`, `Ctx<CurrentUser>`)와 함수 본문을 컴파일 타임에 완전히 제거하고 `serge-adapter-client`(Dual-Rail + 뷰 언마운트 시 `CancellationToken` 전파) 호출 스텁만 남깁니다.
+
+```rust
+// shared/projects.rs — 단일 모델 + 인라인 서버 함수
+#[model]
+pub struct CreateProject { #[validate(len = 1..=80)] pub title: String }
+
+#[server(POST "/projects")]
+pub async fn create_project_rpc(
+    #[server_ctx] db: Ctx<Db>,
+    #[server_ctx] user: Ctx<CurrentUser>,
+    input: Valid<CreateProject>,
+) -> HyveResult<Project> {
+    db.insert(Project { id: Id::new(), owner_id: user.id, title: input.into_inner().title, is_public: false, version: 1 }).await
+}
+
+// server — 전역 매직 없이 BackendComponent에 명시 등록
+pub fn project_rpc_component() -> BackendComponent {
+    orbic::component()
+        .wrap(AuthGuard::require_user())
+        .handle(create_project_rpc)
+}
+```
+
+## 3. `hyve` CLI와 통합된 백엔드 개발 흐름
 
 `loco.rs`가 제공하는 제너레이터·마이그레이션·워커 실행 경험을 `hyve` CLI 서브커맨드/워크플로 안으로 통합합니다:
 
