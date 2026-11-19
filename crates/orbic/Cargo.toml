@@ -12,5 +12,9 @@ readme = "../../README.md"
 keywords = ["hyperish", "backend", "web", "framework", "api"]
 categories = ["web-programming::http-server", "asynchronous"]
 
+[dependencies]
+hyve = { git = "https://github.com/hyperish/hyve.git", branch = "main" }
+orbic-macros = { path = "../orbic-macros", version = "0.0.1-alpha.0" }
+
 [lints]
 workspace = true
