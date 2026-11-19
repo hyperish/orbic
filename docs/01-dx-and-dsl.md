@@ -1,6 +1,6 @@
 # 01. DX 및 컴포넌트 설계 (ring)
 
-> 상태: Rust 스타일 컴포넌트 조립 아키텍처·`loco.rs` 도메인 생산성·개발 생산성 중심 표현 개방성은 **확정**, 세부 API 시그니처는 **제안** · 기준일: 2026-11-18
+> 상태: Rust 스타일 컴포넌트 조립 아키텍처·`loco.rs` 도메인 생산성·영역별 표현 방식 고정(조립은 순수 Rust 체이닝)은 **확정**, 세부 API 시그니처는 **제안** · 기준일: 2026-11-19
 
 `ring`의 DX 목표는 **`loco.rs`처럼 백엔드에 필요한 모든 부품(ORM/Query, Cache, Auth, Middleware, 워커, 실시간 룸, Swagger, TestClient)이 처음부터 준비되어 있으면서**, 고정된 폴더 구조를 강요하지 않고 **깔끔한 Rust 스타일 컴포넌트(`BackendComponent`)로 개발자가 원하는 아키텍처를 직접 조립**하게 하는 것입니다.
 
@@ -45,6 +45,7 @@ pub fn project_component() -> BackendComponent {
         .post("/projects", create_project)
         .get("/projects", list_projects)
         .room("/projects/{id}/live", project_live_room)
+        // 분산 리더 락으로 멀티 레플리카 중복 실행을 방지하며 TestClient에서는 자동 비활성화됨
         .every("1h", cleanup_orphan_uploads)
 }
 
@@ -55,10 +56,10 @@ async fn list_projects(
     user: Ctx<CurrentUser>,
     cursor: Query<CursorParams>,
 ) -> RingResult<Page<Project>> {
-    // Singleflight: 동시 캐시 미스 시 DB 쿼리는 단 1회만 실행
+    // Singleflight: 동시 캐시 미스 시 DB 쿼리는 단 1회만 실행하고 태그를 함께 등록
     cache.get_or_try_init(
         key!("projects", user.id, cursor.after),
-        ttl!("30s"),
+        CacheOpts::ttl(ttl!("30s")).tag(tag!("projects", user.id)),
         || async {
             db.query::<Project>()
                 .where_eq(Project::OWNER_ID, user.id)
@@ -77,6 +78,8 @@ async fn create_project(
 ) -> RingResult<Project> {
     let created = db.tx(|tx| async move {
         let data = input.into_inner();
+        // 컴파일 타임 sql!은 오프라인 스키마 메타데이터/마이그레이션 기준으로 검증됨
+        // (Postgres 전용 방언 쿼리는 테스트 시 임시 Postgres 하네스 사용, 이식 가능한 체이닝 쿼리는 Db::in_memory() 호환)
         sql!(
             Project,
             "INSERT INTO projects (id, owner_id, title, is_public, version)
