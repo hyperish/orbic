@@ -1,0 +1,16 @@
+[package]
+name = "orbic"
+description = "Component-based Rust backend framework for the Hyperish family"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["hyperish", "backend", "web", "framework", "api"]
+categories = ["web-programming::http-server", "asynchronous"]
+
+[lints]
+workspace = true
