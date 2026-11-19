@@ -33,7 +33,7 @@ pub fn project_component() -> BackendComponent {
 | 번호 | 문서 | 내용 |
 |---|---|---|
 | 00 | [개요와 범위](docs/00-overview.md) | `ring`의 정체성, 백엔드 도메인 범위(DB·Cache·MSA·WS/WT), `loco.rs` 레퍼런스, 코어 `ref` 원칙 |
-| 01 | [DX 및 DSL 설계](docs/01-dx-and-dsl.md) | `loco.rs` + Dioxus 매크로 감각을 결합한 백엔드 선언적 DX(리소스·마이그레이션·라우트·워커) |
+| 01 | [DX 및 컴포넌트 설계](docs/01-dx-and-dsl.md) | Rust 스타일 컴포넌트 조립(`BackendComponent`), DB 투트랙 쿼리, 캐시·인증·인메모리 `TestClient` DX |
 | 02 | [아키텍처와 크레이트 구조](docs/02-architecture.md) | `apps/`, `crates/` 모노레포 구성, `hyper` 코어 참조 구조, 백엔드 도메인 크레이트 및 내부 포크 |
 | 03 | [파이프라인과 호환 어댑터](docs/03-adapters-and-pipeline.md) | DB/Cache/MSA/WS·WT 파이프라인 및 HTTP/JSON·WebSocket 등 외부 호환 어댑터 경계 |
 | 04 | [열린 결정](docs/04-open-questions.md) | `ring` 레포의 미정 사항 목록과 결정 기록 |
