@@ -16,7 +16,7 @@
    - **경량 타입 안전 체이닝**(일상적인 CRUD·동적 필터·커서 페이지네이션)과 **컴파일 타임 스키마 검증 `sql!` 매크로**(복잡한 조인·집계·튜닝 쿼리 탈출구; 라이브 DB 없는 IDE·CI를 위해 마이그레이션 스키마/오프라인 메타데이터 검증 지원) 투트랙을 제공하며, **PostgreSQL**과 **SQLite / LibSQL**을 1급 지원합니다.
    - `db.tx(...)` 클로저 기반 트랜잭션과 요청 `CancellationToken` 발동 시 자동 롤백을 내장합니다.
 3. **계층형 캐시 서버 (`orbic-cache`)**:
-   - **In-Memory(`Moka` 계열 L1)**, **Redis / Valkey(RESP3 파이프라이닝 L2)**, 그리고 읽기는 L1에서 처리하고 쓰기/삭제 시 Redis Pub/Sub·Invalidation으로 L1을 자동 무효화하는 **Tiered(L1+L2) 캐시**를 지원합니다.
+   - **In-Memory(`quick_cache` S3-FIFO 계열 L1)**, **Redis / Valkey(RESP3 파이프라이닝 L2)**, 그리고 읽기는 L1에서 처리하고 쓰기/삭제 시 Redis Pub/Sub·Invalidation으로 L1을 자동 무효화하는 **Tiered(L1+L2) 캐시**를 지원합니다.
    - 캐시 만료 시 동시 DB 폭주(Stampede)를 막는 **Singleflight(`get_or_try_init`)**, **태그(`tag!`) 기반 일괄 무효화**, 멱등 키(`Idempotency-Key`) 보관소 및 분산 레이트리미터(`RateLimit`)를 기본 내장합니다.
 4. **플랫폼 통합 세션 · 쿠키 · 인증 (`orbic-auth`)**:
    - **웹(`serge-web`)**은 `HttpOnly + Secure + SameSite=Lax` 쿠키 + `X-CSRF-Token` 검증으로, **네이티브(`serge-native`)·CLI**는 OS 보안 키체인 기반 `Bearer` 토큰으로 전송하되 핸들러는 동일한 `Ctx<CurrentUser>`로 주입받습니다.
