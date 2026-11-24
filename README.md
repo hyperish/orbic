@@ -37,3 +37,4 @@ pub fn project_component() -> BackendComponent {
 | 02 | [아키텍처와 크레이트 구조](docs/02-architecture.md) | `apps/`, `crates/` 모노레포 구성, `hyve` 코어 참조 구조, 백엔드 도메인 크레이트 및 내부 포크 |
 | 03 | [파이프라인과 호환 어댑터](docs/03-adapters-and-pipeline.md) | DB/Cache/MSA/WS·WT 파이프라인 및 HTTP/JSON·WebSocket 등 외부 호환 어댑터 경계 |
 | 04 | [열린 결정](docs/04-open-questions.md) | `orbic` 레포의 미정 사항 목록과 결정 기록 |
+| 05 | [구현 계획](docs/05-implementation-plan.md) | Phase 1 작업 순서와 완료 기준 |
