@@ -12,8 +12,8 @@
 2. **접근 권한·멱등성 게이트**:
    - 보호 대상은 요청 시점마다 소유 계층이 권한과 철회 여부를 검사합니다(`02-core-contracts.md` §6).
    - 부수효과가 있는 생성성 요청(`POST`로 바인딩한 라우트)의 `Idempotency-Key`는 `orbic-cache`를 통해 중복 실행과 동시 처리(`409 request_in_progress`)를 제어합니다. 게이트는 키가 온 요청에만 작동하고, 키가 없으면 그대로 처리합니다. 처음 응답은 성공이든 `Domain` 오류든 그대로 재사용하고, `Infra`·`Internal` 오류는 저장하지 않아 다시 시도할 수 있습니다. "같은 본문"은 레일(미디어 타입)과 본문 바이트의 다이제스트가 모두 같은 것이며, 같은 키를 다른 레일로 보내면 `409 idempotency_key_mismatch`입니다. 보관 기간은 구현이 정하고 문서화합니다.
-   - 순서는 라우트 매칭 → `wrap` 가드(선언한 순서대로) → 멱등성 게이트 → 추출·검증 → 핸들러입니다. 멱등 응답 재사용은 항상 인증·권한 검사 뒤이고, 키의 범위는 인증 주체·메서드·경로·키의 조합입니다(`hyperish/docs` `02-core-contracts.md` §6).
-   - `RateLimit`는 선언한 창(`per_minute(60)`이면 1분)이 지나면 초기화되며, 남은 횟수와 초기화까지 남은 시간을 `hyperish/docs` `03-api-protocol.md` §8의 헤더로 그 범위의 모든 응답에 싣습니다. 키와 범위는 `01-dx-and-dsl.md` §1의 조립 계약이 정합니다.
+   - 순서는 라우트 매칭(고속 레일이면 함수 식별자와 스키마 지문 판정 포함) → `wrap` 가드(선언한 순서대로) → 멱등성 게이트 → 추출·검증 → 핸들러입니다. 멱등 응답 재사용은 항상 인증·권한 검사 뒤이고, 키의 범위는 인증 주체·메서드·경로·키의 조합입니다(`hyperish/docs` `02-core-contracts.md` §6).
+   - `RateLimit`는 선언한 창(`per_minute(60)`이면 1분)이 지나면 초기화되며, 남은 횟수와 초기화까지 남은 시간을 `hyperish/docs` `03-api-protocol.md` §8의 헤더로 `RateLimit` 가드에 도달한 요청의 응답에 싣습니다. 앞선 가드가 먼저 거부한 요청은 세지 않고 헤더도 없습니다. 프록시 뒤에서 클라이언트 주소는 신뢰하도록 지정한 프록시가 전달한 값을 씁니다. 키와 범위는 `01-dx-and-dsl.md` §1의 조립 계약이 정합니다.
    - `orbic-core`는 멱등 키, 속도 제한 정보, 자격 증명을 전송 중립 요청·응답 메타데이터로 다룹니다. 이를 HTTP 헤더(`Idempotency-Key`, `RateLimit-*`, 쿠키, `Authorization`, `X-CSRF-Token`)와 맞바꾸는 것은 `orbic-adapter-http`입니다.
 3. **도메인 실행 및 커밋/보상**:
    - `orbic-db` 트랜잭션과 `orbic-jobs` 워커는 취소 가능 지점과 커밋 지점을 명시하며, 커밋 이후 실패 시 보상 절차 또는 재조정(reconciliation) 상태를 기록합니다(`02-core-contracts.md` §3).
@@ -21,10 +21,10 @@
    - `Domain`: `code`가 `03-api-protocol.md` §4 표에 있으면 그 상태 코드, `_not_found`로 끝나면 `404`, 그 밖은 `422`입니다. `code`는 그대로 내보냅니다.
    - `Infra`: `503`입니다. `code`는 오류가 공개용으로 선언한 값이면 그대로, 아니면 `service_unavailable`입니다. 재시도 가능하면 `Retry-After`를 붙입니다.
    - `Internal`: `500 internal_error`입니다. 원문은 로그에만 남깁니다.
-   - 프레임워크가 내는 오류: 라우트 없음 `404 route_not_found`, 메서드 불일치 `405 method_not_allowed`, 본문 크기 초과 `413 payload_too_large`, 받을 수 없는 본문 형식 `415 unsupported_media_type`, 고속 레일 스키마 불일치 `415 schema_mismatch`, CSRF 실패 `403 csrf_token_invalid`.
-   - 고속 레일은 같은 상태 코드에 아카이브한 오류 값을 싣습니다(`hyve/docs/03-adapters-and-pipeline.md` §3.3).
+   - 프레임워크가 내는 오류: 라우트 없음 `404 route_not_found`, 메서드 불일치 `405 method_not_allowed`, 본문 크기 초과 `413 payload_too_large`, 받을 수 없는 본문 형식 `415 unsupported_media_type`(고속 레일을 받지 않는 경로, 모르는 함수 식별자 포함), 고속 레일 스키마 불일치 `415 schema_mismatch`, CSRF 실패 `403 csrf_token_invalid`.
+   - 위 규칙으로 정한 공개 형태(종류, `code`, `message`, `details`, 재시도 가능 여부, `requestId`)는 레일을 고르기 전에 한 번만 만듭니다. 표준 레일은 그것을 봉투와 상태 코드로, 고속 레일은 같은 상태 코드에 그것을 아카이브해 싣습니다(`hyve/docs/03-adapters-and-pipeline.md` §3.3). `Infra`의 `code` 치환과 `Internal`의 가림은 두 레일에 똑같이 적용되고, 내부 오류 값 자체는 어느 레일로도 나가지 않습니다.
 
-- **`TestClient`의 위치**: `TestClient`는 소켓만 빼고 `orbic-adapter-http`의 변환 계층(상태 코드, 헤더, 봉투, CORS, 보안 헤더, 요청 크기 제한)을 그대로 통과합니다. 그래서 같은 시나리오가 `TestClient`와 실제 서버에서 같은 응답을 냅니다. `TestClient`는 `hyve-api`의 전송 트레이트도 구현해 `#[server]` 스텁을 두 레일로 구동합니다.
+- **`TestClient`의 위치**: `TestClient`는 소켓만 빼고 `orbic-adapter-http`의 변환 계층(상태 코드, 헤더, 봉투, CORS, 보안 헤더, 요청 크기 제한)을 그대로 통과합니다. 그래서 같은 시나리오가 `TestClient`와 실제 서버에서 같은 응답을 냅니다. `TestClient`는 `hyve-api`의 전송 트레이트도 구현하며, 레일을 지정하면 `#[server]` 스텁의 호출을 그 레일의 직렬화와 변환 계층까지 통과시킵니다. 레일을 지정하지 않은 인프로세스 전송은 직렬화 없이 파이프라인만 거칩니다(`hyve/docs/03-adapters-and-pipeline.md` §3.2).
 - **TLS (제안)**: Phase 1의 `orbic-adapter-http`는 HTTP/1.1을 서빙하고 TLS 종단은 앞단 프록시에 맡깁니다. 운영 설정에서는 신뢰하도록 지정한 프록시가 전달한 스킴이 HTTPS가 아닌 요청을 거부하고, 루프백에 바인딩한 개발·테스트 서버만 평문을 허용합니다. 자체 TLS와 HTTP/2는 Phase 2에서 정합니다.
 
 ## 2. 호환 어댑터 구성
