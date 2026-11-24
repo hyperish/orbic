@@ -1,6 +1,6 @@
 # 04. 열린 결정 (orbic)
 
-> 기준일: 2026-11-19
+> 상태: "열려 있는 결정"은 **미정**(방향은 **제안**), "결정됨"은 **확정** 기록(제안으로 추가한 내용은 항목 안에 표시) · 기준일: 2026-11-24
 
 `orbic` 레포 범위의 미정 사항 목록입니다. 범용 명세 전체의 결정 기록은 [`hyperish/docs/docs/07-open-questions.md`](https://github.com/hyperish/docs/blob/main/docs/07-open-questions.md)에서 추적합니다.
 
@@ -14,9 +14,14 @@
 ## 결정됨
 
 - **Rust 스타일 `BackendComponent` 조립 아키텍처 및 `loco.rs` 레퍼런스 확정** (2026-11-17 ~ 2026-11-18): `00-overview.md`, `01-dx-and-dsl.md`
-- **DB 투트랙 쿼리(`#[table]` 체이닝 + `sql!` 매크로), L1/L2 Tiered 캐시(Singleflight·태그 무효화), 웹 쿠키+네이티브 Bearer 통합 Opaque 세션(L2 직결 즉시 철회 기본), Dual-Rail 네트워크(표준 HTTP/WS + 고속 `hyve-serde`/WebTransport) 및 필수 백엔드 도메인 확정** (2026-11-18 ~ 2026-11-19): `00-overview.md`, `02-architecture.md`, `03-adapters-and-pipeline.md`
+- **DB 투트랙 쿼리(`#[table]` 체이닝 + `sql!` 매크로), L1/L2 Tiered 캐시(Singleflight·태그 무효화), 웹 쿠키+네이티브 Bearer 통합 Opaque 세션(권위 저장소 직결 즉시 철회 기본 — 2026-11-24 보정), Dual-Rail 네트워크(표준 HTTP/WS + 고속 `hyve-serde`/WebTransport) 및 필수 백엔드 도메인 확정** (2026-11-18 ~ 2026-11-19): `00-overview.md`, `02-architecture.md`, `03-adapters-and-pipeline.md`
 - **crates.io 비충돌 고유명 `orbic`(구 `ring`) 및 순수 `MIT` 라이선스 확정** (2026-11-19): 레포명·crates.io 패키지명·Rust 크레이트명을 `orbic`으로 1:1 일치
 - **MIT 포크 스택(`hyper`+`matchit`·`sqlx-core`·`quick_cache`·`fred`·`quinn`/`wtransport`·`tokio-tungstenite`·`utoipa`), 내부 코어 개조 방향, `#[server]`↔`BackendComponent::handle` 명시 등록 계약 및 Phase 1~3 컷 확정** (2026-11-19):
-  - Phase 1(`v0.1.0`): `orbic-core`·`orbic-adapter-http`·`orbic-db`·`orbic-auth`(L2 기본)·`orbic-openapi`·`TestClient`
-  - Phase 2(`v0.2.0`): `orbic-cache`(L1+L2 Tiered)·`orbic-storage`·`orbic-jobs`(DLQ·분산 락 `.every`)·`orbic-adapter-serge`(SSR/SSG)
+  - Phase 1(`v0.1.0`): `orbic-core`·`orbic-macros`(`#[table]`·`sql!`)·`orbic-adapter-http`(표준 레일 + 고속 레일 요청-응답)·`orbic-db`·`orbic-cache` 인메모리 저장소(세션·멱등 키·`RateLimit`)·`orbic-auth`(권위 저장소 직접 조회)·`orbic-openapi`·`TestClient`
+  - Phase 2(`v0.2.0`): `orbic-cache` L2(Redis/Valkey)·Tiered(L1+L2)·`orbic-storage`·`orbic-jobs`(DLQ·분산 락 `.every`)·`orbic-adapter-serge`(SSR/SSG)
   - Phase 3(`v0.3.0+`): `orbic-adapter-ws`(WebTransport+WS 폴백)·`orbic-realtime`·`orbic-msa`·SAGA·`orbic-notify` (`01-dx-and-dsl.md` §2, `02-architecture.md` §3)
+- **Phase 1 의존 폐포 보정 및 세션 권위 저장소 정리** (2026-11-24): `orbic-db`가 쓰는 `orbic-macros`와 세션·멱등 키·`RateLimit`가 쓰는 `orbic-cache` 인메모리 저장소를 Phase 1에 포함(위 목록에 반영). 즉시 철회의 확정 내용은 "권위 저장소 직접 조회"이며, 단일 노드는 인프로세스 저장소가, 멀티 레플리카는 L2(Redis/Valkey)가 권위 저장소 (`00-overview.md` §1, `03-adapters-and-pipeline.md` §2)
+- **Dual-Rail 폴백에서도 고속 레일은 `hyve-serde` 바이너리 유지** (2026-11-24): 고속 레일의 요청-응답은 `orbic-adapter-http` 바이너리 본문, 스트림·실시간은 WebTransport이며 WS로 폴백해도 바이너리 프레임을 유지. JSON 텍스트 프레임은 표준 레일 전용 (`00-overview.md` §1, `02-architecture.md` §1, §3, `03-adapters-and-pipeline.md` §2)
+- **`#[server]` 게이팅·소유 기준 정리** (2026-11-24): 클라이언트 빌드 조건 표기를 `not(feature = "server")`로 바로잡고, 제거 기준이 타깃이 아니라 `server` 피처임을 명시. 매크로는 `hyve-macros` 소유이고 메서드·경로 인자는 `orbic`만 해석 (`01-dx-and-dsl.md` §2)
+- **`orbic-core`와 `orbic-adapter-http`의 분담 정리** (2026-11-24): 코어 무오염 원칙에 맞춰 CORS·보안 헤더·`413`·`/health`·`/metrics` 노출은 `orbic-adapter-http`로, 전송 중립 요청 파이프라인과 셧다운 조율은 `orbic-core`로 정리. 파이프라인은 `orbic-core`가 소유하고 모든 어댑터와 `TestClient`가 같은 진입점을 호출 (`00-overview.md` §1, `02-architecture.md` §1, §3, `03-adapters-and-pipeline.md` §1)
+- **포크 표 보정** (2026-11-24): `quinn` 라이선스 기재, 표의 버전은 확인 시점 스냅샷으로 취급 (`02-architecture.md` §3)
