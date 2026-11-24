@@ -14,7 +14,7 @@
    - 생성·상태 변경 요청의 `Idempotency-Key`는 `orbic-cache`를 통해 중복 실행과 동시 처리(`409 request_in_progress`)를 제어합니다.
 3. **도메인 실행 및 커밋/보상**:
    - `orbic-db` 트랜잭션과 `orbic-jobs` 워커는 취소 가능 지점과 커밋 지점을 명시하며, 커밋 이후 실패 시 보상 절차 또는 재조정(reconciliation) 상태를 기록합니다(`02-core-contracts.md` §3).
-4. **응답 변환**: 내부 구조화 오류(`Domain` / `Infra` / `Internal`)는 어댑터 경계에서 내부 스택 노출 없이 외부 규약의 오류 형식으로 변환됩니다. `#[server]` 스텁이 두 레일에서 같은 오류를 복원할 수 있도록, HTTP 변환은 오류의 종류와 재시도 가능 여부를 상태 코드와 `Retry-After`로 왕복 가능하게 정의합니다(`01-dx-and-dsl.md` §2).
+4. **응답 변환**: 내부 구조화 오류(`Domain` / `Infra` / `Internal`)는 어댑터 경계에서 내부 스택 노출 없이 외부 규약의 오류 형식으로 변환됩니다. `#[server]` 스텁이 두 레일에서 같은 오류를 복원할 수 있도록, HTTP 변환은 오류의 종류와 재시도 가능 여부를 상태 코드와 `Retry-After`로 왕복 가능하게 정의합니다(`Domain`은 4xx, `Infra`는 `503`, `Internal`은 `500` — `hyperish/docs` `03-api-protocol.md` §4, `01-dx-and-dsl.md` §2).
 
 ## 2. 호환 어댑터 구성
 
