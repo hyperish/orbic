@@ -13,7 +13,7 @@
    - CORS 화이트리스트, 보안 헤더(CSP, HSTS), 요청 크기 제한(`413`), 헬스체크(`/health`), 메트릭(`/metrics`), 진행 중인 트랜잭션·요청 완료 후 닫는 **Graceful Shutdown**을 기본 내장합니다. HTTP 고유 항목(CORS·보안 헤더·`413`·`/health`·`/metrics` 노출)은 `orbic-adapter-http`가 적용하고, `orbic-core`는 전송 중립인 조립 트리·요청 파이프라인·셧다운 조율만 가집니다(`02-architecture.md` §2 코어 무오염 원칙).
 2. **데이터베이스(DB) & SQL 투트랙 쿼리 (`orbic-db`)**:
    - 별도 ORM 엔티티 보일러플레이트 없이 `hyve`의 `#[model]` 구조체에 `#[table("...")]`만 붙여 직결합니다.
-   - **경량 타입 안전 체이닝**(일상적인 CRUD·동적 필터·커서 페이지네이션)과 **컴파일 타임 스키마 검증 `sql!` 매크로**(복잡한 조인·집계·튜닝 쿼리 탈출구; 라이브 DB 없는 IDE·CI를 위해 마이그레이션 스키마/오프라인 메타데이터 검증 지원) 투트랙을 제공하며, **PostgreSQL**과 **SQLite / LibSQL**을 1급 지원합니다.
+   - **경량 타입 안전 체이닝**(일상적인 CRUD·동적 필터·커서 페이지네이션)과 **컴파일 타임 스키마 검증 `sql!` 매크로**(복잡한 조인·집계·튜닝 쿼리 탈출구; 라이브 DB 없는 IDE·CI를 위해 레포에 커밋한 오프라인 메타데이터 캐시로 검증 — `01-dx-and-dsl.md` §4) 투트랙을 제공하며, **PostgreSQL**과 **SQLite / LibSQL**을 1급 지원합니다.
    - `db.tx(...)` 클로저 기반 트랜잭션과 요청 `CancellationToken` 발동 시 자동 롤백을 내장합니다.
 3. **계층형 캐시 서버 (`orbic-cache`)**:
    - **In-Memory(`quick_cache` S3-FIFO 계열 L1)**, **Redis / Valkey(RESP3 파이프라이닝 L2)**, 그리고 읽기는 L1에서 처리하고 쓰기/삭제 시 Redis Pub/Sub·Invalidation으로 L1을 자동 무효화하는 **Tiered(L1+L2) 캐시**를 지원합니다.
