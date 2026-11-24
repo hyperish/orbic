@@ -8,6 +8,7 @@ members = [
     "crates/orbic-core",
     "crates/orbic-db",
     "crates/orbic-macros",
+    "crates/orbic-openapi",
     "crates/orbic-sql-cache",
     "crates/orbic-tests",
 ]
@@ -29,6 +30,7 @@ orbic-auth = { path = "crates/orbic-auth", version = "=0.1.0-alpha.0" }
 orbic-cache = { path = "crates/orbic-cache", version = "=0.1.0-alpha.0" }
 orbic-core = { path = "crates/orbic-core", version = "=0.1.0-alpha.0" }
 orbic-db = { path = "crates/orbic-db", version = "=0.1.0-alpha.0" }
+orbic-openapi = { path = "crates/orbic-openapi", version = "=0.1.0-alpha.0" }
 orbic-macros = { path = "crates/orbic-macros", version = "=0.1.0-alpha.0" }
 orbic-sql-cache = { path = "crates/orbic-sql-cache", version = "=0.1.0-alpha.0" }
 
@@ -55,6 +57,10 @@ http = "=1.5.0"
 http-body-util = "=0.1.5"
 hyper = { version = "=1.12.0", default-features = false }
 hyper-util = { version = "=0.1.21", default-features = false }
+# OpenAPI model only; its `macros` feature is needed for the model to compile
+# (upstream gates an internal path behind it), the derives are never used
+# (docs/02-architecture.md §3).
+utoipa = { version = "=6.0.0", default-features = false, features = ["macros"] }
 # Already in the tree through sqlx-postgres; same versions.
 getrandom = "=0.4.3"
 sha2 = "=0.11.1"

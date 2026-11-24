@@ -7,13 +7,19 @@ use hyve_api::{BoxFuture, ContextNeed, Method, ServerFnDescriptor, ServerHandler
 use hyve_core::{HyveResult, Scope};
 use hyve_serde::from_json;
 
-use crate::extract::{Parts, decode_body, from_params, parse_query};
+use hyve_validate::SchemaRegistry;
+
+use crate::extract::{
+    Params, ParamsFrom, Parts, RouteShape, decode_body, from_params, parse_query,
+};
 use crate::guard::Guard;
 use crate::handler::{Handler, encode};
 use crate::request::{Body, Payload, Rail};
 
 pub(crate) type Endpoint =
     Arc<dyn Fn(Parts) -> BoxFuture<'static, HyveResult<Payload>> + Send + Sync>;
+
+pub(crate) type Describe = Arc<dyn Fn(&mut SchemaRegistry) -> RouteShape + Send + Sync>;
 
 pub(crate) struct RouteDef {
     pub method: Method,
@@ -22,6 +28,7 @@ pub(crate) struct RouteDef {
     pub name: &'static str,
     pub needs: Vec<ContextNeed>,
     pub endpoint: Endpoint,
+    pub describe: Describe,
     pub server_fn: Option<&'static ServerFnDescriptor>,
 }
 
@@ -75,6 +82,10 @@ impl BackendComponent {
             name: std::any::type_name::<H>(),
             needs: H::needs(),
             endpoint,
+            describe: {
+                let describe: fn(&mut SchemaRegistry) -> RouteShape = H::describe;
+                Arc::new(describe)
+            },
             server_fn: None,
         });
         self
@@ -115,6 +126,7 @@ impl BackendComponent {
             name: d.id,
             needs: <F::Marker as ServerHandler>::context(),
             endpoint: server_endpoint::<F::Marker>(),
+            describe: server_shape(d),
             server_fn: Some(d),
         });
         self
@@ -126,6 +138,29 @@ impl BackendComponent {
         self.children.push((prefix.to_owned(), child));
         self
     }
+}
+
+/// A `#[server]` function's request model is its body, or for `GET` and
+/// `DELETE` its parameters (`docs/01-dx-and-dsl.md` §2, 본문 없는 메서드).
+fn server_shape(d: &'static ServerFnDescriptor) -> Describe {
+    Arc::new(move |registry: &mut SchemaRegistry| {
+        let request = (d.request_schema)(registry);
+        let mut shape = RouteShape {
+            response: (d.response_schema)(registry),
+            ..RouteShape::default()
+        };
+        if d.args.is_empty() {
+        } else if matches!(d.method, Method::Get | Method::Delete) {
+            shape.params.push(Params {
+                from: ParamsFrom::PathOrQuery,
+                name: (d.args.len() == 1).then(|| hyve_api_camel(d.args[0])),
+                schema: request,
+            });
+        } else {
+            shape.body = Some(request);
+        }
+        shape
+    })
 }
 
 fn server_endpoint<M: ServerHandler>() -> Endpoint {

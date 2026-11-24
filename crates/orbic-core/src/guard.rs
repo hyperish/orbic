@@ -23,6 +23,15 @@ pub struct GuardCtx<'r> {
     pub response: &'r mut ResponseMeta,
 }
 
+/// What a guard adds to a route's description (`orbic-openapi`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GuardShape {
+    /// The route needs a credential.
+    pub authenticates: bool,
+    /// Error codes the guard may answer with.
+    pub errors: Vec<&'static str>,
+}
+
 /// A check around a component's routes, added with `wrap`. Guards run in the
 /// order they were wrapped, outermost component first, each exactly once per
 /// request; the first error ends the request.
@@ -42,6 +51,11 @@ pub trait Guard: Send + Sync + 'static {
     /// may take them as `Ctx<T>` (checked when the app is assembled).
     fn provides(&self) -> Vec<ContextNeed> {
         Vec::new()
+    }
+
+    /// What the guard adds to the description of the routes it wraps.
+    fn describe(&self) -> GuardShape {
+        GuardShape::default()
     }
 
     /// Checks the request.

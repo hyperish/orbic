@@ -15,6 +15,8 @@ use orbic_cache::Cache;
 
 use crate::component::{BackendComponent, Endpoint};
 use crate::extract::Parts;
+use crate::extract::RouteShape;
+use crate::guard::GuardShape;
 use crate::guard::{Guard, GuardCtx};
 use crate::handler::Handler;
 use crate::idempotency::{self, Gate};
@@ -155,6 +157,7 @@ struct Route {
     pattern: String,
     name: &'static str,
     endpoint: Endpoint,
+    describe: crate::component::Describe,
     scope: Scope,
     guards: Vec<Arc<dyn Guard>>,
     server_fn: Option<&'static ServerFnDescriptor>,
@@ -233,6 +236,7 @@ impl Assembly {
                 pattern,
                 name: r.name,
                 endpoint: r.endpoint,
+                describe: r.describe,
                 scope: scope.clone(),
                 guards: guards.clone(),
                 server_fn: r.server_fn,
@@ -295,7 +299,7 @@ struct Inner {
 }
 
 /// A registered route, for documentation generators.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone)]
 pub struct RouteInfo<'a> {
     /// The method.
     pub method: Method,
@@ -305,6 +309,28 @@ pub struct RouteInfo<'a> {
     pub name: &'static str,
     /// The `#[server]` contract, for routes added with `handle`.
     pub server_fn: Option<&'static ServerFnDescriptor>,
+    /// What the guards around the route add, outermost first.
+    pub guards: Vec<GuardShape>,
+    describe: &'a crate::component::Describe,
+}
+
+impl RouteInfo<'_> {
+    /// What the route reads and answers; named types are registered in
+    /// `registry`.
+    pub fn shape(&self, registry: &mut hyve_validate::SchemaRegistry) -> RouteShape {
+        (self.describe)(registry)
+    }
+}
+
+impl std::fmt::Debug for RouteInfo<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RouteInfo")
+            .field("method", &self.method)
+            .field("pattern", &self.pattern)
+            .field("name", &self.name)
+            .field("guards", &self.guards)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Pipeline {
@@ -315,6 +341,8 @@ impl Pipeline {
             pattern: &r.pattern,
             name: r.name,
             server_fn: r.server_fn,
+            guards: r.guards.iter().map(|g| g.describe()).collect(),
+            describe: &r.describe,
         })
     }
 

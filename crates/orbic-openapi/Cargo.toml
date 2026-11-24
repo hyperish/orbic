@@ -1,0 +1,18 @@
+[package]
+name = "orbic-openapi"
+description = "OpenAPI 3.1 documents for orbic apps, generated from hyve schemas and the HTTP adapter's wire rules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hyve.workspace = true
+orbic-adapter-http.workspace = true
+orbic-core.workspace = true
+utoipa.workspace = true
+
+[lints]
+workspace = true

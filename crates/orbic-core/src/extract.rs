@@ -35,12 +35,64 @@ impl Parts {
     }
 }
 
+/// Where a route's parameters come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamsFrom {
+    /// Path placeholders (`Path<T>`).
+    Path,
+    /// The query string (`Query<T>`).
+    Query,
+    /// Path placeholders with the same name, the query string otherwise
+    /// (`#[server]` functions bound to `GET`/`DELETE`).
+    PathOrQuery,
+}
+
+/// A group of parameters: an object's fields by their JSON names, or one
+/// value called `name` (the route's only placeholder when `None`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Params {
+    /// Where they come from.
+    pub from: ParamsFrom,
+    /// The name of a single non-object value.
+    pub name: Option<String>,
+    /// Their schema.
+    pub schema: SchemaNode,
+}
+
+/// What a route reads from the request and answers, in protocol-neutral
+/// schemas, for documentation generators (`orbic-openapi`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RouteShape {
+    /// Parameters.
+    pub params: Vec<Params>,
+    /// The request body.
+    pub body: Option<SchemaNode>,
+    /// The response model (`Null` for `()`, answered without a value).
+    pub response: SchemaNode,
+}
+
+impl Default for RouteShape {
+    fn default() -> Self {
+        RouteShape {
+            params: Vec::new(),
+            body: None,
+            response: SchemaNode::Null,
+        }
+    }
+}
+
 /// A handler argument.
 pub trait Extract: Sized + Send + 'static {
     /// The injected value this argument needs, checked when the app is
     /// assembled.
     fn need() -> Option<ContextNeed> {
         None
+    }
+
+    /// Adds what this argument reads from the request to the route's
+    /// description.
+    fn describe(registry: &mut SchemaRegistry, shape: &mut RouteShape) {
+        let _ = (registry, shape);
     }
 
     /// Reads the argument.
@@ -57,13 +109,25 @@ impl<T: Send + Sync + 'static> Extract for Ctx<T> {
     }
 }
 
-impl<T: Binary + Json + Validate + Send + 'static> Extract for Valid<T> {
+impl<T: Binary + Json + Validate + Schema + Send + 'static> Extract for Valid<T> {
+    fn describe(registry: &mut SchemaRegistry, shape: &mut RouteShape) {
+        shape.body = Some(T::schema(registry));
+    }
+
     fn extract(parts: &mut Parts) -> Result<Self, HyveError> {
         Valid::new(decode_body::<T>(parts.rail, parts.take_body())?)
     }
 }
 
 impl<T: Json + Schema + Send + 'static> Extract for Query<T> {
+    fn describe(registry: &mut SchemaRegistry, shape: &mut RouteShape) {
+        shape.params.push(Params {
+            from: ParamsFrom::Query,
+            name: None,
+            schema: T::schema(registry),
+        });
+    }
+
     fn extract(parts: &mut Parts) -> Result<Self, HyveError> {
         let pairs = parse_query(&parts.query)?;
         from_params::<T>(&pairs, None, "query").map(Query)
@@ -71,6 +135,14 @@ impl<T: Json + Schema + Send + 'static> Extract for Query<T> {
 }
 
 impl<T: Json + Schema + Send + 'static> Extract for Path<T> {
+    fn describe(registry: &mut SchemaRegistry, shape: &mut RouteShape) {
+        shape.params.push(Params {
+            from: ParamsFrom::Path,
+            name: None,
+            schema: T::schema(registry),
+        });
+    }
+
     fn extract(parts: &mut Parts) -> Result<Self, HyveError> {
         from_params::<T>(&parts.params, None, "path").map(Path)
     }

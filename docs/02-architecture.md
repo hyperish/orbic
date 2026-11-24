@@ -62,6 +62,8 @@ orbic/
 
 - **실행 기록 (2026-11-24, 확정의 실행 방식을 바꿈)**: Phase 1의 `orbic-adapter-http`는 `hyper`를 포크하지 않고 `=1.12.0`(`http1`, `server`; 표에 기록한 버전, 2026-10-06 배포)으로 고정해 의존합니다. 착수 시점의 최신은 `1.13.0`이었으나 하루 전(2026-11-23)에 나온 버전이라 쓰지 않았습니다. `axum`/`tower` 없이 `hyper`의 연결 API에 `HttpApp`을 직접 연결합니다. 포크는 `hyve`와 같은 기준(측정으로 필요가 확인될 때)으로 미룹니다.
 
+- **실행 기록 (2026-11-24, 확정의 실행 방식을 바꿈)**: Phase 1의 `orbic-openapi`는 `utoipa`를 포크하지 않고 `=6.0.0`(2026-09-22 배포, 최소 Rust 1.88)으로 고정해 OpenAPI 3.1 모델 타입만 씁니다. 파생 매크로는 쓰지 않지만 `macros` 피처를 켭니다. 이 피처 없이는 모델 자체가 컴파일되지 않기 때문입니다(내부 경로가 이 피처 뒤에 있음, 6.0.0과 5.5.0에서 확인). 이로써 `utoipa-gen` `6.0.1`(`MIT OR Apache-2.0`)이 더해지며, 그 의존성(`proc-macro2`·`quote`·`syn` 3)과 `utoipa`의 `serde`·`serde_json`·`indexmap`은 이미 트리에 있던 버전입니다. 소스를 편입해 이 피처 의존을 걷어내는 것은 포크 착수 기준(측정·패치 필요)을 따릅니다.
+
 외부 의존성(포크하지 않음, 2026-11-24, crates.io 확인): `orbic-adapter-http`의 `hyper-util` (`=0.1.21`, `MIT`, `tokio` 피처의 입출력 어댑터만), `http-body-util` (`=0.1.5`, `MIT`), `http` (`=1.5.0`, `MIT OR Apache-2.0`), `bytes` (`=1.12.2`, `MIT`, 이미 트리에 있던 버전).
 
 외부 의존성(포크하지 않음, 2026-11-24): `orbic-auth`의 `sha2` (`=0.11.1`, `MIT OR Apache-2.0`)와 `getrandom` (`=0.4.3`, `MIT OR Apache-2.0`)은 `sqlx-postgres`가 이미 트리에 두는 같은 버전을 씁니다(`getrandom`은 `hyve`의 고정 버전과도 같음).

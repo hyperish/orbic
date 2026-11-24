@@ -7,7 +7,9 @@ use hyve_api::{BoxFuture, ContextNeed, Wire};
 use hyve_core::HyveResult;
 use hyve_serde::to_json_data;
 
-use crate::extract::{Extract, Parts};
+use hyve_validate::{Schema, SchemaRegistry};
+
+use crate::extract::{Extract, Parts, RouteShape};
 use crate::request::{Payload, Rail};
 
 /// An `async fn(A1, ..., An) -> HyveResult<T>` whose arguments are
@@ -18,6 +20,9 @@ pub trait Handler<Args>: Clone + Send + Sync + 'static {
 
     /// The injected values the arguments need.
     fn needs() -> Vec<ContextNeed>;
+
+    /// What the handler reads and answers.
+    fn describe(registry: &mut SchemaRegistry) -> RouteShape;
 
     /// Extracts the arguments and runs the function.
     fn call(&self, parts: Parts) -> BoxFuture<'static, HyveResult<Self::Response>>;
@@ -37,6 +42,16 @@ macro_rules! handler {
             fn needs() -> Vec<ContextNeed> {
                 let needs: Vec<Option<ContextNeed>> = vec![$($a::need()),*];
                 needs.into_iter().flatten().collect()
+            }
+
+            #[allow(unused_mut)]
+            fn describe(registry: &mut SchemaRegistry) -> RouteShape {
+                let mut shape = RouteShape {
+                    response: <R as Schema>::schema(registry),
+                    ..RouteShape::default()
+                };
+                $($a::describe(registry, &mut shape);)*
+                shape
             }
 
             #[allow(non_snake_case, unused_mut, unused_variables)]

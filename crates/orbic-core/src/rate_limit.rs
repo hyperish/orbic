@@ -65,6 +65,13 @@ impl Guard for RateLimit {
         vec![ContextNeed::of::<Cache>()]
     }
 
+    fn describe(&self) -> crate::GuardShape {
+        crate::GuardShape {
+            authenticates: false,
+            errors: vec!["rate_limited"],
+        }
+    }
+
     fn check<'a>(&'a self, cx: &'a mut GuardCtx<'_>) -> BoxFuture<'a, HyveResult<()>> {
         Box::pin(async move {
             let cache = cx.scope.require::<Cache>()?;

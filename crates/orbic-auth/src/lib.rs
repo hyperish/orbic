@@ -26,7 +26,9 @@ use hyve::api::{BoxFuture, ContextNeed, Method, Wire};
 use hyve::prelude::*;
 use hyve::serde::Binary as _;
 use orbic_cache::Cache;
-use orbic_core::{Credential, CredentialSlot, CredentialUpdate, Guard, GuardCtx, Principal};
+use orbic_core::{
+    Credential, CredentialSlot, CredentialUpdate, Guard, GuardCtx, GuardShape, Principal,
+};
 
 /// A type the app authenticates as (`CurrentUser`): stored in the session
 /// and provided to handlers.
@@ -388,6 +390,17 @@ impl<U: SessionUser> Guard for AuthGuard<U> {
             ContextNeed::of::<Principal>(),
             ContextNeed::of::<CurrentSession>(),
         ]
+    }
+
+    fn describe(&self) -> GuardShape {
+        let mut errors = vec!["unauthenticated", "csrf_token_invalid"];
+        if self.rule.is_some() {
+            errors.push("forbidden");
+        }
+        GuardShape {
+            authenticates: true,
+            errors,
+        }
     }
 
     fn check<'a>(&'a self, cx: &'a mut GuardCtx<'_>) -> BoxFuture<'a, HyveResult<()>> {
