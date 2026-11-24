@@ -20,8 +20,8 @@
 - **추출자**: 핸들러 인자는 `Ctx<T>`(주입), `Valid<T>`(본문), `Query<T>`(쿼리), `Path<T>`(경로 파라미터)입니다. 반환한 `OrbicResult<T>`는 `hyperish/docs` `03-api-protocol.md` §4의 봉투로 변환됩니다.
 - **리터럴**: `ttl!`, `key!`, `tag!`의 리터럴은 컴파일 타임에, `.every("1h")` 같은 조립 인자는 조립 시점에 검증합니다. 해석할 수 없는 값을 기본값으로 대체하지 않습니다. `key!`와 `tag!`는 구성 요소가 구분자와 충돌하지 않게 인코딩합니다.
 - **OpenAPI**: 생성되는 문서는 실제 와이어 형식을 그대로 기술합니다. 응답 봉투, 오류 응답, 인증 요구가 포함됩니다.
-- **심볼의 소유**: `Id<T>`, `HyveResult<T>`, `Ctx<T>`, `Valid<T>`, `Path<T>`, `Query<T>`는 `hyve`의 것입니다. `OrbicResult<T>`는 `HyveResult<T>`의 별칭이라 계층 사이에 오류 변환이 없습니다. `Page<T>`와 `CursorParams`는 `orbic`이 제공하며 `hyperish/docs` `03-api-protocol.md` §4·§5의 목록 응답과 커서 요청에 대응합니다. `CurrentUser`는 `orbic-auth`가 요청 스코프에 주입하는 인증 주체이고, 사용자 모델(`User`) 자체는 앱이 정의합니다.
-- **공유 모델의 `#[table]`**: `#[table]`과 `#[pk]`는 `orbic-macros`의 속성이며 테이블 메타데이터만 만듭니다. 생성물은 `#[server]`와 같은 기준으로 `server` 피처가 켜진 빌드에만 남습니다(§2). 공유 크레이트는 `orbic-macros`에만 의존하면 되고, 클라이언트 빌드는 DB 코드를 링크하지 않습니다.
+- **심볼의 소유**: `Id<T>`, `HyveResult<T>`, `Ctx<T>`, `Valid<T>`, `Path<T>`, `Query<T>`, `Page<T>`, `CursorParams`는 `hyve`의 것이고 `orbic`은 재수출만 합니다. `Page<T>`와 `CursorParams`는 `hyperish/docs` `03-api-protocol.md` §4·§5의 목록 응답과 커서 요청에 대응하며, 공유 크레이트의 `#[server]` 함수도 쓸 수 있습니다. `OrbicResult<T>`는 `HyveResult<T>`의 별칭이라 계층 사이에 오류 변환이 없습니다. `CurrentUser`와 `User`는 앱이 정의하는 모델입니다. 앱이 인증 주체 타입(`CurrentUser`)을 `orbic-auth`에 등록하면 `orbic-auth`가 세션에 저장했다가 요청 스코프에 주입하고, `.as_user(...)`도 그 타입의 값을 받습니다.
+- **공유 모델의 `#[table]`**: `#[table]`과 `#[pk]`는 `orbic-macros`의 속성이며 테이블 메타데이터만 만듭니다. 생성물은 `#[server]`와 같은 기준으로 `server` 피처가 켜진 빌드에만 남습니다(§2). 공유 크레이트는 진입 크레이트 `orbic`을 기본 피처를 끈 채 의존합니다. 이 상태의 `orbic`은 매크로와 메타데이터 타입만 내보내고 `wasm32`에서도 빌드되며, 런타임(DB, HTTP, `tokio`)은 `orbic`의 `server` 피처에 있습니다. 그래서 클라이언트 빌드는 DB 코드를 링크하지 않습니다.
 - **`RateLimit`의 키**: 인증 주체가 있으면 그 주체, 없으면 클라이언트 주소를 키로 하고, 범위는 `wrap`한 컴포넌트입니다. `AuthGuard`보다 먼저 `wrap`하면 인증 전이므로 주소 기준으로만 셉니다.
 - **인증 엔드포인트**: `orbic-auth`는 세션 발급·조회·회전·철회와 `AuthGuard`를 제공하고, 로그인·로그아웃 라우트는 앱이 정의해 이를 호출합니다. Phase 1은 라우트를 내장하지 않습니다. 세션 쿠키 이름은 `orbic-auth` 설정으로 정하며 기본값은 구현이 문서화합니다.
 - **낙관적 잠금**: Phase 1은 전용 API를 두지 않습니다. 요청 모델의 `expectedVersion`과 체이닝 쿼리의 조건부 갱신으로 구현하고, 갱신된 행이 없으면 핸들러가 `Domain` 오류 `version_conflict`를 돌려줍니다.
@@ -140,11 +140,11 @@ async fn create_project_rejects_empty_title() {
 - **서버 빌드(`feature = "server"`)**: `#[server(POST "/projects")]`는 핸들러 본문과 계약 디스크립터를 남겨 `orbic::component().wrap(AuthGuard::require_user()).handle(create_project)`로 **명시 등록**합니다(권한 가드·레이트리밋·`/v1` 마운트·OpenAPI·`TestClient` 100% 일관 적용).
 - **클라이언트 빌드(`not(feature = "server")`)**: `#[server_ctx]` 추출자(`Ctx<Db>`, `Ctx<CurrentUser>`)와 함수 본문을 컴파일 타임에 완전히 제거하고 `serge-adapter-client`(Dual-Rail + 뷰 언마운트 시 `CancellationToken` 전파) 호출 스텁만 남깁니다.
 - **스텁은 어느 빌드에나 있습니다 (확정, 2026-11-24)**: 함수 이름으로 부르는 것은 서버 빌드에서도 스텁입니다. 같은 프로세스 안의 호출은 `orbic`의 인프로세스 전송이 받아 같은 요청 파이프라인(가드 포함)에 넣습니다. 포트 없는 풀스택 테스트와 `TestClient`의 두 레일 검증이 이 경로를 씁니다(`hyve/docs/03-adapters-and-pipeline.md` §3).
-- **경로와 마운트**: `#[server]`의 경로는 `.handle(...)`로 등록한 컴포넌트의 마운트 접두어 아래에 놓입니다. 클라이언트는 접두어를 기준 URL 설정으로 받습니다. `#[server]` 함수를 서로 다른 접두어 아래에 등록하려면 전송을 접두어별로 제공해야 하므로, Phase 1은 한 앱의 `#[server]` 함수를 한 접두어 아래에 둡니다.
-- **기준은 타깃이 아니라 피처**: 제거 여부는 함수가 선언된 공유 크레이트의 `server` 피처로만 갈립니다. 서버 바이너리만 이 피처를 켜고, 웹(WASM)과 네이티브 클라이언트는 모두 끈 상태로 빌드해 서버 본문과 DB 의존성을 링크하지 않습니다.
+- **경로와 마운트 (제안, 2026-11-24)**: `#[server]`의 경로는 `.handle(...)`로 등록한 컴포넌트의 마운트 접두어 아래에 놓입니다. 클라이언트는 접두어를 기준 URL 설정으로 받습니다. `#[server]` 함수를 서로 다른 접두어 아래에 등록하려면 전송을 접두어별로 제공해야 하므로, Phase 1은 한 앱의 `#[server]` 함수를 한 접두어 아래에 둡니다.
+- **기준은 타깃이 아니라 피처**: 제거 여부는 함수가 선언된 공유 크레이트의 `server` 피처로만 갈립니다. 서버 바이너리와, 서버와 UI를 한 프로세스에 두는 빌드(포트 없는 풀스택 테스트, 단일 바이너리)가 이 피처를 켭니다. 배포하는 웹(WASM)과 네이티브 클라이언트는 끈 상태로 빌드해 서버 본문과 DB 의존성을 링크하지 않습니다.
 - **소유와 해석**: `#[server]`/`#[server_ctx]` 매크로는 `hyve-macros`가 소유합니다. `POST "/projects"` 인자는 `hyve`가 해석하지 않는 바인딩 메타데이터이고, 이를 HTTP 라우트와 OpenAPI로 해석하는 것은 `orbic`입니다(`hyve/docs/02-architecture.md` §2.4).
 - **인자와 오류 (확정, 2026-11-24)**: 스텁이 보내는 요청 모델과 오류 복원 규칙은 `hyve/docs/02-architecture.md` §2.4를 따릅니다. `orbic`은 같은 요청 모델을 고속 레일(바이너리)과 표준 레일(JSON) 양쪽에서 받습니다. 전송 인자가 1개면 그 모델이 곧 요청 본문이라 `.post()`로 등록한 일반 핸들러·OpenAPI·`TestClient`와 형태가 같습니다. 표준 레일의 오류는 `hyperish/docs` `03-api-protocol.md` §4의 봉투(`requestId` 포함)를 그대로 쓰며 필드를 추가하지 않습니다.
-- **본문 없는 메서드 (제안, 2026-11-24)**: `GET`이나 `DELETE`로 바인딩하면 표준 레일에서는 요청 모델의 필드를 쿼리 파라미터로 받고, 경로의 `{이름}` 자리표시자와 이름이 같은 필드는 경로에서 채웁니다. 고속 레일은 바인딩된 메서드와 무관하게 `POST` 본문에 요청 모델을 그대로 싣습니다(`hyve/docs/03-adapters-and-pipeline.md` §3.3).
+- **본문 없는 메서드 (제안, 2026-11-24)**: `GET`이나 `DELETE`로 바인딩하면 표준 레일에서는 요청 모델의 필드를 쿼리 파라미터로 받고, 경로의 `{이름}` 자리표시자와 이름이 같은 필드는 경로에서 채웁니다. 전송 인자가 모델이 아닌 값 하나면 필드 이름 대신 그 인자의 이름을 씁니다(`GET "/projects/{id}"`에 `id: Id<Project>`). 고속 레일은 바인딩된 메서드와 무관하게 `POST` 본문에 요청 모델을 그대로 싣습니다(`hyve/docs/03-adapters-and-pipeline.md` §3.3).
 
 ```rust
 // shared/projects.rs — 단일 모델 + 인라인 서버 함수
