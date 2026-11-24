@@ -43,7 +43,7 @@ mod rate_limit;
 mod request;
 
 pub use app::{AssemblyError, Idle, OrbicApp, Pipeline, RouteInfo};
-pub use component::{BackendComponent, component};
+pub use component::{BackendComponent, arg_json_name, component};
 pub use extract::{
     Extract, Params, ParamsFrom, Parts, RouteShape, decode_body, from_params, parse_query,
 };

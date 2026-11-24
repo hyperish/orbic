@@ -161,6 +161,7 @@ struct Route {
     scope: Scope,
     guards: Vec<Arc<dyn Guard>>,
     server_fn: Option<&'static ServerFnDescriptor>,
+    take: Option<crate::component::TakeRequest>,
 }
 
 #[derive(Default)]
@@ -240,6 +241,7 @@ impl Assembly {
                 scope: scope.clone(),
                 guards: guards.clone(),
                 server_fn: r.server_fn,
+                take: r.take,
             });
         }
         for (p, child) in c.children {
@@ -350,6 +352,63 @@ impl Pipeline {
     pub fn dispatch(&self, request: Request) -> BoxFuture<'static, Response> {
         let inner = self.inner.clone();
         Box::pin(async move { inner.dispatch(request).await })
+    }
+
+    /// Runs a `#[server]` call in process (`hyve/docs/03-adapters-and-pipeline.md`
+    /// §3.2): the typed request model goes through routing, guards and the
+    /// handler without serialization, and a successful response is
+    /// [`Payload::Value`](crate::Payload::Value) (or `Empty` for `()`).
+    /// `meta` carries the credential and correlation ID; its `server_fn`
+    /// is set from the call.
+    pub fn dispatch_call(
+        &self,
+        call: hyve_api::Call,
+        mut meta: crate::RequestMeta,
+    ) -> BoxFuture<'static, Response> {
+        let d = call.descriptor();
+        let route = self
+            .inner
+            .by_fn_id
+            .get(d.id)
+            .map(|&i| &self.inner.routes[i]);
+        let taken = match route.and_then(|r| r.take.map(|take| (r, take))) {
+            Some((r, take)) => take(call).map(|v| (r.pattern.clone(), v)).map_err(|_| {
+                HyveError::internal(format!(
+                    "the in-process call of `{}` carries another request type than the registered function",
+                    d.id
+                ))
+            }),
+            None => Err(framework_error(
+                "route_not_found",
+                format!(
+                    "no route for the `#[server]` function `{}`; register it with `.handle(...)`",
+                    d.id
+                ),
+            )),
+        };
+        meta.server_fn = Some((d.id.to_owned(), d.fingerprint));
+        match taken {
+            Ok((path, value)) => self.dispatch(Request {
+                method: d.method,
+                path,
+                query: String::new(),
+                rail: Rail::InProcess,
+                body: crate::Body::Value(value),
+                meta,
+            }),
+            Err(e) => {
+                let request_id = meta.request_id.unwrap_or_default();
+                let e = e.to_public().with_request_id(request_id.clone());
+                Box::pin(async move {
+                    Response {
+                        rail: Rail::InProcess,
+                        request_id,
+                        outcome: Err(e),
+                        meta: ResponseMeta::default(),
+                    }
+                })
+            }
+        }
     }
 
     /// Stops accepting requests: new ones fail with a retryable

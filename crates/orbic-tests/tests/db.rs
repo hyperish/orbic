@@ -26,9 +26,9 @@ async fn chaining(db: Db) {
         .map(|t| project(a, t))
         .collect();
     for p in &mine {
-        db.insert(p).await.unwrap();
+        db.insert(p.clone()).await.unwrap();
     }
-    db.insert(&project(b, "other")).await.unwrap();
+    db.insert(project(b, "other")).await.unwrap();
     mine.sort_by_key(|p| p.id.to_string());
 
     let q = || db.query::<Project>().where_eq(Project::OWNER_ID, a);
@@ -77,7 +77,7 @@ async fn chaining(db: Db) {
         .await
         .unwrap_err();
     assert_eq!(e.code(), "projects_not_found");
-    let e = db.insert(&mine[1]).await.unwrap_err();
+    let e = db.insert(mine[1].clone()).await.unwrap_err();
     assert_eq!(e.code(), "already_exists");
 }
 
@@ -125,12 +125,12 @@ async fn queries_and_transactions(db: Db) {
     let (ok_id, bad_id) = (ok.id, bad.id);
     let (r1, r2) = tokio::join!(
         db.tx(|tx| async move {
-            tx.insert(&ok).await?;
+            tx.insert(ok.clone()).await?;
             tokio::task::yield_now().await;
             Ok(())
         }),
         db.tx(|tx| async move {
-            tx.insert(&bad).await?;
+            tx.insert(bad.clone()).await?;
             Err::<(), _>(HyveError::domain("nope", "rolled back"))
         }),
     );
@@ -148,7 +148,7 @@ async fn queries_and_transactions(db: Db) {
     let cancelled = project(owner, "cancelled");
     let cancelled_id = cancelled.id;
     let run = db.tx(|tx| async move {
-        tx.insert(&cancelled).await?;
+        tx.insert(cancelled.clone()).await?;
         std::future::pending::<()>().await;
         Ok(())
     });
@@ -169,7 +169,7 @@ async fn queries_and_transactions(db: Db) {
     .unwrap();
     let e = leaked
         .unwrap()
-        .insert(&project(owner, "late"))
+        .insert(project(owner, "late"))
         .await
         .unwrap_err();
     assert!(e.message().contains("already ended"), "{e:?}");
@@ -194,7 +194,7 @@ async fn types_round_trip(db: Db) {
         },
     ];
     for e in &events {
-        db.insert(e).await.unwrap();
+        db.insert(e.clone()).await.unwrap();
     }
     for e in &events {
         assert_eq!(
@@ -282,7 +282,7 @@ on_both!(
 #[hyve::test]
 async fn in_memory_databases_are_separate() {
     let (a, b) = (Db::in_memory().await, Db::in_memory().await);
-    a.insert(&project(Id::new(), "only in a")).await.unwrap();
+    a.insert(project(Id::new(), "only in a")).await.unwrap();
     assert_eq!(a.query::<Project>().count().await.unwrap(), 1);
     assert_eq!(b.query::<Project>().count().await.unwrap(), 0);
 }

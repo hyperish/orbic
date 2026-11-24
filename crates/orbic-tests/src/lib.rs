@@ -49,6 +49,39 @@ pub struct Project {
     pub version: i64,
 }
 
+/// A signed-in user for tests (the sketch's `test_user()`).
+pub fn test_user() -> CurrentUser {
+    CurrentUser {
+        id: Id::new(),
+        name: "ada".into(),
+        admin: false,
+    }
+}
+
+// `docs/01-dx-and-dsl.md` §2 sketch, verbatim: single model + inline server
+// function.
+#[model]
+pub struct CreateProject {
+    #[validate(len = 1..=80)]
+    pub title: String,
+}
+
+#[server(POST "/projects")]
+pub async fn create_project_rpc(
+    #[server_ctx] db: Ctx<Db>,
+    #[server_ctx] user: Ctx<CurrentUser>,
+    input: Valid<CreateProject>,
+) -> HyveResult<Project> {
+    db.insert(Project {
+        id: Id::new(),
+        owner_id: user.id,
+        title: input.into_inner().title,
+        is_public: false,
+        version: 1,
+    })
+    .await
+}
+
 /// Every column type, for round trips on both dialects.
 #[model]
 #[table("events")]

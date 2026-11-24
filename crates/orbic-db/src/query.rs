@@ -394,9 +394,11 @@ macro_rules! entry_points {
                 }
             }
 
-            /// Inserts `row`.
-            pub async fn insert<M: Table>(&self, row: &M) -> HyveResult<()> {
-                insert(self.clone().exec(), row).await
+            /// Inserts `row` and returns it (`docs/01-dx-and-dsl.md` §2:
+            /// `db.insert(Project { .. }).await` is the handler's result).
+            pub async fn insert<M: Table>(&self, row: M) -> HyveResult<M> {
+                insert(self.clone().exec(), &row).await?;
+                Ok(row)
             }
 
             /// An `UPDATE` of `M`.

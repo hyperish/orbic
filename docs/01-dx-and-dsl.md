@@ -29,6 +29,7 @@
   - **구현 세부 (제안, 2026-11-24)**: 앱은 인증 주체 타입을 한 번 등록합니다: `impl SessionUser for CurrentUser`(인증 주체의 안정된 식별자를 돌려줌, 토큰이 아님)와 `type AuthGuard = orbic::AuthGuard<CurrentUser>;`. 그래서 스케치의 `AuthGuard::require_user()`가 그대로 `Ctx<CurrentUser>`를 제공합니다(조립 시점 검사 대상). `AuthGuard::require(|u| ...)`는 규칙이 거짓이면 `403 forbidden`입니다. 핸들러는 `orbic_auth::sign_in(&user, Client::Web | Client::Bearer)`, `sign_out()`, `refresh::<U>(token)`, `current()`(세션 조회: 웹은 CSRF 토큰을 다시 받음, 토큰은 돌려주지 않음)를 부릅니다. 웹은 세션 토큰을 쿠키로(어댑터가 설정), CSRF 토큰을 본문으로 받고, Bearer는 액세스·리프레시 토큰을 본문으로 받습니다. 토큰은 OS CSPRNG의 256비트를 base64url(43자)로 씁니다. 세션 토큰과 리프레시 토큰은 SHA-256으로만 저장소 키가 되고 원문은 저장하지 않습니다. CSRF 토큰은 세션 기록 안에 원문으로 두며, 세션 토큰 없이는 쓸 수 없습니다. 세션은 30분 유휴 시 만료(요청마다 연장)되고 로그인 7일 뒤 무조건 만료되며, 리프레시 토큰은 30일이고 한 번만 쓰입니다(`AuthConfig`를 `provide`해 바꿈). 쓴 리프레시 토큰을 다시 내면 그 계열(세션과 리프레시 토큰) 전체를 폐기합니다. 쿠키 이름은 어댑터가 읽고 쓰는 HTTP 항목이라(코어 무오염 원칙, `02-architecture.md` §2) `orbic-auth`가 아니라 앱 루트에 `provide`하는 `orbic-adapter-http`의 `HttpConfig::session_cookie(name)`로 정하고 기본값은 `hyperish_session`입니다(위 문장의 "orbic-auth 설정"을 대신함). 세션 변경은 핸들러가 성공했을 때만 응답 메타데이터(`credential_update`)에 실립니다.
 - **낙관적 잠금**: Phase 1은 전용 API를 두지 않습니다. 요청 모델의 `expectedVersion`과 체이닝 쿼리의 조건부 갱신으로 구현하고, 갱신된 행이 없으면 핸들러가 `Domain` 오류 `version_conflict`를 돌려줍니다.
 - **`TestClient`의 `.as_user()`**: 가드를 건너뛰지 않습니다. 그 사용자의 유효한 세션을 저장소에 만들고 요청에 자격 증명을 붙여, 실제 요청과 같은 경로로 인증됩니다.
+  - **구현 세부 (제안, 2026-11-24)**: `TestClient::new(app)`은 조립에 실패하면 문제 목록으로 패닉합니다. `.as_user(user)`는 요청(`client.post(..).as_user(u)`)과 클라이언트(`client.as_user(u)`, 이후 모든 요청과 `#[server]` 호출) 양쪽에 있고, 앱 루트에 `provide`된 `Cache`에 그 사용자의 Bearer 세션을 만들어 `Authorization`으로 보냅니다(`Cache`가 루트에 없으면 패닉). `TestResponse`는 `status()`·`header()`·`text()`·`json::<T>()`(성공 봉투를 읽음)·`error()`(전송과 같은 규칙으로 오류를 복원)를 줍니다. `client.on(Rail::Fast | Rail::Standard, stub(..))`(`hyve-api`의 `TestClient` 트레이트)는 그 레일로 HTTP 변환을 통과하고, `client.in_process()`는 직렬화 없는 인프로세스 전송(`orbic::InProcess`)입니다. 서버는 `orbic::serve(app, listener, shutdown)`, HTTP 앱만 필요하면 `orbic::http_app(app)`입니다.
 
 ### 백엔드 컴포넌트 · DB 투트랙 쿼리 · 캐시 · 인메모리 TestClient 스케치 (제안)
 
@@ -108,7 +109,7 @@ async fn create_project(
         .await
     }).await?;
 
-    cache.invalidate_tag(tag!("projects", user.id)).await?;
+    cache.invalidate_tag(tag!("projects", created.owner_id)).await?;
     Ok(created)
 }
 
