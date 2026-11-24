@@ -96,13 +96,13 @@ impl OrbicApp {
         }
         let mut by_fn_id = HashMap::new();
         for (i, r) in cx.routes.iter().enumerate() {
-            if let Some(d) = r.server_fn {
-                if by_fn_id.insert(d.id, i).is_some() {
-                    problems.push(format!(
-                        "`#[server]` function `{}` is registered twice",
-                        d.id
-                    ));
-                }
+            if let Some(d) = r.server_fn
+                && by_fn_id.insert(d.id, i).is_some()
+            {
+                problems.push(format!(
+                    "`#[server]` function `{}` is registered twice",
+                    d.id
+                ));
             }
         }
         if !problems.is_empty() {

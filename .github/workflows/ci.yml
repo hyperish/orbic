@@ -9,16 +9,28 @@ on:
 env:
   CARGO_TERM_COLOR: always
   # Must match `rust-version` in Cargo.toml (hyperish/docs 05-development-rules.md §8).
-  MSRV: "1.85"
+  MSRV: "1.94"
   # hyve is not published yet: the workspace depends on `../hyve` with an exact
   # version (hyperish/docs 05-development-rules.md §5), so CI checks it out next
   # to orbic. Switch to the registry once `hyve 0.1.0-alpha.N` is published.
   HYVE_REF: feat/phase1
+  # PostgreSQL tests and `hyve-orbic codegen --check` need a server; without
+  # it they fail rather than skip (docs/01-dx-and-dsl.md §4).
+  HYPERISH_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
 
 jobs:
   check:
     name: Format, Clippy & Test (stable)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     defaults:
       run:
         working-directory: orbic

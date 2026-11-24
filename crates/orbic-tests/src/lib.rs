@@ -29,6 +29,19 @@ pub struct Project {
     pub version: i64,
 }
 
+/// Every column type, for round trips on both dialects.
+#[model]
+#[table("events")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Event {
+    #[pk]
+    pub id: Id<Event>,
+    pub at: Timestamp,
+    pub score: Option<f64>,
+    pub payload: Vec<u8>,
+    pub flag: Option<bool>,
+}
+
 #[model]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Note {

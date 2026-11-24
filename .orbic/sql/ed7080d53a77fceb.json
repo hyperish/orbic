@@ -1,0 +1,1 @@
+{"sql":"SELECT * FROM projects WHERE title ILIKE $1","params":[{"type":"text"}],"columns":[{"name":"id","type":"text","nullable":false},{"name":"owner_id","type":"text","nullable":false},{"name":"title","type":"text","nullable":false},{"name":"is_public","type":"bool","nullable":false},{"name":"version","type":"int","nullable":false}],"dialects":["postgres"]}

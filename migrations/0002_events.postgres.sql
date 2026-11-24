@@ -1,0 +1,7 @@
+CREATE TABLE events (
+    id TEXT PRIMARY KEY NOT NULL,
+    at TIMESTAMPTZ NOT NULL,
+    score DOUBLE PRECISION,
+    payload BYTEA NOT NULL,
+    flag BOOLEAN
+);

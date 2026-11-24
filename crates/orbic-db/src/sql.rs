@@ -4,8 +4,9 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use hyve_core::{Id, Timestamp, Ulid};
+use hyve_core::{HyveResult, Id, Timestamp, Ulid};
 
+use crate::db::{Exec, Target};
 use crate::table::Table;
 use crate::value::{DbValue, SqlType};
 
@@ -26,7 +27,25 @@ pub mod types {
     pub struct Timestamp;
 }
 
-/// A Rust value that can be bound to a parameter of type `M`.
+/// A parameter type marker.
+pub trait Marker {
+    /// The type it stands for.
+    const TYPE: SqlType;
+}
+
+macro_rules! markers {
+    ($($m:ident),*) => {$(
+        impl Marker for types::$m {
+            const TYPE: SqlType = SqlType::$m;
+        }
+    )*};
+}
+
+markers!(Bool, Int, Float, Text, Bytes, Timestamp);
+
+/// A Rust value that can be bound to a parameter of type `M`. Each Rust type
+/// binds as exactly one type, so `sql!` can infer it where the engine did not
+/// type the parameter.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` cannot be bound to this `sql!` parameter",
     label = "the offline cache records a different type for this parameter",
@@ -121,9 +140,21 @@ impl Encode<types::Timestamp> for Timestamp {
     }
 }
 
+/// A bound parameter: the value and the type it binds as (`NULL` needs one).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bind {
+    /// The value.
+    pub value: DbValue,
+    /// The parameter type.
+    pub ty: SqlType,
+}
+
 /// Binds `value` as a parameter of type `M`.
-pub fn bind<M, V: Encode<M> + ?Sized>(value: &V) -> DbValue {
-    value.encode()
+pub fn bind<M: Marker, V: Encode<M> + ?Sized>(value: &V) -> Bind {
+    Bind {
+        value: value.encode(),
+        ty: M::TYPE,
+    }
 }
 
 /// A query from `sql!`. `M` is the model rows decode into (`()` for
@@ -132,7 +163,7 @@ pub struct Sql<M = ()> {
     sql: &'static str,
     dialects: &'static [&'static str],
     columns: &'static [&'static str],
-    binds: Vec<DbValue>,
+    binds: Vec<Bind>,
     _model: PhantomData<fn() -> M>,
 }
 
@@ -142,7 +173,7 @@ impl<M> Sql<M> {
         sql: &'static str,
         dialects: &'static [&'static str],
         columns: &'static [&'static str],
-        binds: Vec<DbValue>,
+        binds: Vec<Bind>,
     ) -> Self {
         Sql {
             sql,
@@ -168,9 +199,56 @@ impl<M> Sql<M> {
         self.columns
     }
 
-    /// The bound values in parameter order.
-    pub fn binds(&self) -> &[DbValue] {
+    /// The bound parameters in order.
+    pub fn binds(&self) -> &[Bind] {
         &self.binds
+    }
+
+    /// Runs a statement without rows; returns the number of rows affected.
+    pub async fn execute(self, target: impl Target) -> HyveResult<u64> {
+        let exec = self.checked(target)?;
+        exec.execute(self.sql.into(), &self.binds).await
+    }
+
+    /// Refuses a database whose dialect the query was not verified on,
+    /// without sending it.
+    fn checked(&self, target: impl Target) -> HyveResult<Exec> {
+        let exec = target.exec();
+        let dialect = exec.dialect().name();
+        if self.dialects.contains(&dialect) {
+            Ok(exec)
+        } else {
+            Err(hyve_core::HyveError::internal(format!(
+                "this `sql!` query was verified on {} only, not on the {dialect} database it was sent to \
+                 (it was not sent); make it portable and run `hyve codegen`, or test it on the dialect it targets: {}",
+                if self.dialects.is_empty() {
+                    "no dialect".to_owned()
+                } else {
+                    self.dialects.join(", ")
+                },
+                self.sql
+            )))
+        }
+    }
+}
+
+impl<M: Table> Sql<M> {
+    /// The single row; `<table>_not_found` without one.
+    pub async fn fetch_one(self, target: impl Target) -> HyveResult<M> {
+        self.fetch_optional(target)
+            .await?
+            .ok_or_else(|| hyve_core::HyveError::not_found(M::NAME))
+    }
+
+    /// The first row, if any.
+    pub async fn fetch_optional(self, target: impl Target) -> HyveResult<Option<M>> {
+        Ok(self.fetch_all(target).await?.into_iter().next())
+    }
+
+    /// Every row.
+    pub async fn fetch_all(self, target: impl Target) -> HyveResult<Vec<M>> {
+        let exec = self.checked(target)?;
+        exec.fetch::<M>(self.sql.into(), &self.binds).await
     }
 }
 
@@ -199,10 +277,11 @@ const fn str_eq(a: &str, b: &str) -> bool {
 }
 
 /// Compile-time check of one result column against `M` (emitted by `sql!`).
+/// Unknown types and nullability are left to decoding.
 pub const fn assert_column<M: Table>(
     name: &str,
-    ty: SqlType,
-    nullable: bool,
+    ty: Option<SqlType>,
+    nullable: Option<bool>,
     missing: &str,
     wrong_type: &str,
     not_optional: &str,
@@ -211,10 +290,14 @@ pub const fn assert_column<M: Table>(
     while i < M::COLUMNS.len() {
         if str_eq(M::COLUMNS[i], name) {
             let (field_ty, field_nullable) = M::TYPES[i];
-            if field_ty as u8 != ty as u8 {
+            if let Some(ty) = ty
+                && field_ty as u8 != ty as u8
+            {
                 panic!("{}", wrong_type);
             }
-            if nullable && !field_nullable {
+            if let Some(true) = nullable
+                && !field_nullable
+            {
                 panic!("{}", not_optional);
             }
             return;

@@ -20,6 +20,7 @@ orbic.workspace = true
 [dev-dependencies]
 orbic-cache.workspace = true
 orbic-core.workspace = true
+tokio = { workspace = true, features = ["macros", "time"] }
 trybuild.workspace = true
 
 [lints]

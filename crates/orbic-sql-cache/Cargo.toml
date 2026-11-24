@@ -11,6 +11,8 @@ authors.workspace = true
 [dependencies]
 hyve-core.workspace = true
 hyve-serde.workspace = true
+proc-macro2 = { workspace = true, features = ["span-locations"] }
+syn.workspace = true
 
 [lints]
 workspace = true

@@ -75,7 +75,7 @@ fn ui() {
 #[cfg(feature = "server")]
 mod sql {
     use hyve::prelude::*;
-    use orbic::__private::db::DbValue;
+    use orbic::__private::db::{DbValue, SqlType};
     use orbic_tests::{Project, User};
 
     use super::*;
@@ -98,12 +98,16 @@ mod sql {
             q.columns(),
             ["id", "owner_id", "title", "is_public", "version"]
         );
+        let values: Vec<_> = q.binds()[1..]
+            .iter()
+            .map(|b| (b.value.clone(), b.ty))
+            .collect();
         assert_eq!(
-            &q.binds()[1..],
+            values,
             [
-                DbValue::Text(owner.to_string()),
-                DbValue::Text("t".into()),
-                DbValue::Bool(false)
+                (DbValue::Text(owner.to_string()), SqlType::Text),
+                (DbValue::Text("t".into()), SqlType::Text),
+                (DbValue::Bool(false), SqlType::Bool)
             ]
         );
 
@@ -112,7 +116,13 @@ mod sql {
             "SELECT * FROM projects WHERE owner_id = $1",
             &owner
         );
-        assert_eq!(q.dialects(), ["sqlite"], "verified on SQLite only");
+        assert_eq!(q.dialects(), ["postgres", "sqlite"]);
+        let q = sql!(
+            Project,
+            "SELECT * FROM projects WHERE title ILIKE $1",
+            "%a%"
+        );
+        assert_eq!(q.dialects(), ["postgres"], "ILIKE is PostgreSQL only");
 
         let none: Option<&str> = None;
         let q = sql!(
@@ -120,7 +130,11 @@ mod sql {
             none,
             Id::<Project>::new()
         );
-        assert_eq!(q.binds()[0], DbValue::Null);
+        assert_eq!(
+            (&q.binds()[0].value, q.binds()[0].ty),
+            (&DbValue::Null, SqlType::Text),
+            "NULL keeps its type"
+        );
         assert!(q.columns().is_empty());
     }
 
