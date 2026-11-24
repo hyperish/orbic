@@ -1,6 +1,6 @@
 # 00. 개요와 범위 (orbic)
 
-> 상태: 역할·도메인 범위·레퍼런스(`loco.rs`)는 **확정**, 세부 모듈 구성 및 구현 Phase 컷은 **제안** · 기준일: 2026-11-24
+> 상태: 역할·도메인 범위·레퍼런스(`loco.rs`)는 **확정**, Phase 컷은 **확정**(`04-open-questions.md`), 세부 모듈 구성은 **제안** · 기준일: 2026-11-24
 
 `orbic`은 하이퍼리쉬 프레임워크 패밀리의 **백엔드 프레임워크** 레포입니다. 공통 추상 계약은 [`hyperish/docs`](https://github.com/hyperish/docs)를 따르며, 코어 모델·상태·직렬화·API 규격 인터페이스는 [`hyve`](https://github.com/hyperish/hyve)를 단일 기준(`ref`)으로 참조합니다.
 
