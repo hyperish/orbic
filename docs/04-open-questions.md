@@ -9,7 +9,6 @@
 | # | 결정 항목 | 왜 중요한가 | 지금의 방향(제안) |
 |---|---|---|---|
 | 1 | 네이티브 서버 런타임과 엣지(Cloudflare Workers/DO/D1/R2) 어댑터 지원 비중 | 배포 타깃에 따라 소켓·이벤트 루프 제어 범위와 스토리지 어댑터 우선순위가 달라짐 | `orbic-core`는 런타임 어댑터로 분리해 네이티브 멀티스레드 서버를 기본으로 두되, 필요 시 엣지/클라우드 바인딩 어댑터를 장착 가능하게 설계 |
-| 2 | `sql!` 오프라인 컴파일 타임 검증 세부 방식 (마이그레이션 AST vs 메타데이터 캐시) 및 `Db::in_memory()` 방언 테스트 분리 | 라이브 DB 없이 IDE·CI 빌드가 통과해야 하며, Postgres 전용 SQL과 SQLite 기반 `Db::in_memory()` 간 테스트 불일치를 막아야 함 | 마이그레이션 AST 정적 검증 또는 `hyve codegen` 오프라인 메타데이터 캐시를 비교 선정하고, Postgres 방언 전용 테스트는 임시 Postgres 하네스 분리 지원 |
 
 ## 결정됨
 
@@ -25,3 +24,5 @@
 - **`#[server]` 게이팅·소유 기준 정리** (2026-11-24): 클라이언트 빌드 조건 표기를 `not(feature = "server")`로 바로잡고, 제거 기준이 타깃이 아니라 `server` 피처임을 명시. 매크로는 `hyve-macros` 소유이고 메서드·경로 인자는 `orbic`만 해석 (`01-dx-and-dsl.md` §2)
 - **`orbic-core`와 `orbic-adapter-http`의 분담 정리** (2026-11-24): 코어 무오염 원칙에 맞춰 CORS·보안 헤더·`413`·`/health`·`/metrics` 노출은 `orbic-adapter-http`로, 전송 중립 요청 파이프라인과 셧다운 조율은 `orbic-core`로 정리. 파이프라인은 `orbic-core`가 소유하고 모든 어댑터와 `TestClient`가 같은 진입점을 호출 (`00-overview.md` §1, `02-architecture.md` §1, §3, `03-adapters-and-pipeline.md` §1)
 - **포크 표 보정** (2026-11-24): `quinn` 라이선스 기재, 표의 버전은 확인 시점 스냅샷으로 취급 (`02-architecture.md` §3)
+- **`sql!` 오프라인 검증 방식과 방언 테스트 분리 확정** (2026-11-24): 마이그레이션 AST 방식 대신 레포에 커밋하는 오프라인 메타데이터 캐시를 채택. 매크로는 컴파일 중 DB에 접속하지 않고, 캐시에 없는 쿼리는 `hyve codegen` 안내가 담긴 컴파일 오류가 됨. PostgreSQL은 캐시를 다시 만드는 머신에만 필요. `Db::in_memory()`는 SQLite 인메모리이며, 검증되지 않은 방언의 DB에서 `sql!`을 실행하면 명시적 오류. 캐시 생성(`codegen` 단계)과 임시 PostgreSQL 하네스는 `orbic-db`와 함께 Phase 1에 속함. 컴파일 타임 스키마 지문 비교는 **제안**으로 남김 (`00-overview.md` §1, `01-dx-and-dsl.md` §4)
+- **`#[server]` 요청 모델·오류 복원 규칙 반영** (2026-11-24): `hyve`가 확정한 호출 스텁 계약(`hyve/docs/02-architecture.md` §2.4)에 맞춰, 전송 인자 1개는 요청 본문 그대로 받고 표준 레일 오류는 03 규약 봉투에 필드를 추가하지 않으며, HTTP 변환이 오류 종류와 재시도 가능 여부를 왕복 가능하게 보존 (`01-dx-and-dsl.md` §2, `03-adapters-and-pipeline.md` §1)
