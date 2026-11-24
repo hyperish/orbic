@@ -12,7 +12,7 @@ pub fn project_component() -> BackendComponent {
     component()
         .wrap(AuthGuard::require_user())
         .post("/projects", create_project)
-        .room("/projects/{id}/live", project_live_room)
+        .get("/projects", list_projects)
 }
 ```
 
