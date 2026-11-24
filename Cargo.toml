@@ -2,6 +2,7 @@
 members = [
     "apps/orbic-cli",
     "crates/orbic",
+    "crates/orbic-auth",
     "crates/orbic-cache",
     "crates/orbic-core",
     "crates/orbic-db",
@@ -22,6 +23,7 @@ authors = ["Hyperish Contributors"]
 [workspace.dependencies]
 # Internal crates.
 orbic = { path = "crates/orbic", version = "=0.1.0-alpha.0", default-features = false }
+orbic-auth = { path = "crates/orbic-auth", version = "=0.1.0-alpha.0" }
 orbic-cache = { path = "crates/orbic-cache", version = "=0.1.0-alpha.0" }
 orbic-core = { path = "crates/orbic-core", version = "=0.1.0-alpha.0" }
 orbic-db = { path = "crates/orbic-db", version = "=0.1.0-alpha.0" }
@@ -45,6 +47,9 @@ matchit = "0.9.2"
 quick_cache = "=0.7.0"
 sqlx = { version = "=0.9.1", default-features = false, features = ["runtime-tokio", "sqlite-bundled", "sqlite-unlock-notify", "postgres"] }
 tokio = "1.54.1"
+# Already in the tree through sqlx-postgres; same versions.
+getrandom = "=0.4.3"
+sha2 = "=0.11.1"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
 syn = { version = "2.0.119", features = ["full"] }

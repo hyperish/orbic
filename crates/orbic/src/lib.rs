@@ -13,6 +13,8 @@ pub use orbic_macros::{key, sql, table, tag, ttl};
 pub type OrbicResult<T> = hyve::HyveResult<T>;
 
 #[cfg(feature = "server")]
+pub use orbic_auth::{AuthConfig, AuthGuard, Client, SessionUser, SignedIn};
+#[cfg(feature = "server")]
 pub use orbic_cache::{Cache, CacheOpts};
 #[cfg(feature = "server")]
 pub use orbic_core::{BackendComponent, OrbicApp, Principal, RateLimit, component};
@@ -22,13 +24,18 @@ pub use orbic_core::{BackendComponent, OrbicApp, Principal, RateLimit, component
 pub mod prelude {
     pub use crate::OrbicResult;
     #[cfg(feature = "server")]
-    pub use crate::{BackendComponent, Cache, CacheOpts, OrbicApp, RateLimit, component};
+    pub use crate::{
+        AuthConfig, AuthGuard, BackendComponent, Cache, CacheOpts, Client, OrbicApp, RateLimit,
+        SessionUser, SignedIn, component,
+    };
     pub use orbic_macros::{key, sql, table, tag, ttl};
 }
 
 #[doc(hidden)]
 pub mod __private {
     pub use hyve::HyveError;
+    #[cfg(feature = "server")]
+    pub use orbic_auth as auth;
     #[cfg(feature = "server")]
     pub use orbic_cache as cache;
     #[cfg(feature = "server")]

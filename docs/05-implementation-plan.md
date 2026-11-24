@@ -35,6 +35,7 @@ Phase 1(`v0.1.0`)의 작업 순서와 완료 기준입니다. Phase 1에 들어�
   - 2단계 `orbic-macros`는 `#[table]`이 만드는 메타데이터와 `sql!` 결과가 기댈 타입(`orbic-db`의 값·테이블·`Sql`)과 `key!`·`tag!`의 키 타입(`orbic-cache`)을 함께 만듭니다. 이 크레이트들의 나머지는 3·4단계입니다. `sql!` 캐시 형식은 별도 크레이트 `orbic-sql-cache`입니다(`02-architecture.md` §1). §1 스케치의 `Id::new()` 인자는 바인딩할 타입이 정해지지 않아 `Id::<Project>::new()`로 고쳤습니다.
   - 3단계: 열린 결정 2를 결정하면서 `orbic-core`가 `orbic-cache`에 의존합니다(저장소 계층이 아래). 그래서 게이트와 `RateLimit` 가드는 `orbic-core`에, 저장소는 `orbic-cache`에 있습니다. 표의 "앞선 단계 1"은 게이트와 가드가 1단계의 파이프라인 위에 놓인다는 뜻으로 남깁니다. L1은 `quick_cache =0.7.0`을 포크하지 않고 정확한 버전으로 고정해 씁니다(`02-architecture.md` §3 실행 기록).
   - 4단계: `sqlx` 0.9.1의 최소 Rust 버전(1.94)에 따라 `orbic` 워크스페이스의 최소 Rust 버전을 1.94로 올렸습니다(`02-architecture.md` §3 실행 기록). PostgreSQL 테스트와 `hyve-orbic codegen --check`(픽스처 캐시가 최신인지)는 `HYPERISH_TEST_POSTGRES_URL`이 필요하므로 CI에 PostgreSQL 서비스를 둡니다. 저장소 루트의 `hyve.toml`·`migrations/`·`.orbic/sql/`은 `orbic-tests`가 쓰는 픽스처 앱 워크스페이스입니다. 2단계의 캐시 형식은 엔진이 실제로 알려주는 정보에 맞춰 `null`(미확인)을 받도록 바꿨고, 2단계에 손으로 쓴 캐시 파일을 `hyve-orbic codegen`이 같은 내용으로 다시 만들어 냄을 확인했습니다(파라미터의 `nullable` 필드 제거만 다름).
+  - 5단계: 인증 주체 타입의 등록 방식과 세션 쿠키 이름의 위치는 `01-dx-and-dsl.md` §1(인증 엔드포인트의 구현 세부)에 적었습니다. 세션의 무조건 만료는 벽시계(`Timestamp::now`) 기준이고, 유휴 만료는 `Cache`의 시계 기준입니다.
 
 `.every`(잡)와 L2 캐시는 Phase 2, `.room`(실시간)과 MSA는 Phase 3입니다.
 

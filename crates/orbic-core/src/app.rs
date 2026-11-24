@@ -18,13 +18,14 @@ use crate::extract::Parts;
 use crate::guard::{Guard, GuardCtx};
 use crate::handler::Handler;
 use crate::idempotency::{self, Gate};
-use crate::request::{Rail, Request, Response, ResponseMeta};
+use crate::request::{CredentialSlot, Rail, Request, Response, ResponseMeta};
 
 /// The application: a root component plus assembly into a [`Pipeline`].
 #[must_use = "build the app with `.build()`"]
 #[derive(Default)]
 pub struct OrbicApp {
     root: BackendComponent,
+    session_cookie: Option<String>,
 }
 
 impl OrbicApp {
@@ -36,6 +37,13 @@ impl OrbicApp {
     /// Provides `value` to every route ([`BackendComponent::provide`]).
     pub fn provide<T: Send + Sync + 'static>(mut self, value: T) -> Self {
         self.root = self.root.provide(value);
+        self
+    }
+
+    /// The name of the session cookie adapters read and set (default
+    /// [`DEFAULT_SESSION_COOKIE`](crate::DEFAULT_SESSION_COOKIE)).
+    pub fn session_cookie(mut self, name: &str) -> Self {
+        self.session_cookie = Some(name.to_owned());
         self
     }
 
@@ -63,7 +71,7 @@ impl OrbicApp {
     pub fn build(self) -> Result<Pipeline, AssemblyError> {
         let root = Scope::root();
         let mut cx = Assembly::default();
-        cx.walk(self.root, "", &root, &[], &[]);
+        let top = cx.walk(self.root, "", &root, &[], &[]);
         let mut problems = cx.problems;
 
         let mut seen: HashMap<(Method, &str), &'static str> = HashMap::new();
@@ -115,7 +123,11 @@ impl OrbicApp {
                 routes: cx.routes,
                 by_fn_id,
                 root,
+                top,
                 state: Shutdown::default(),
+                session_cookie: self
+                    .session_cookie
+                    .unwrap_or_else(|| crate::request::DEFAULT_SESSION_COOKIE.to_owned()),
             }),
         })
     }
@@ -173,7 +185,7 @@ impl Assembly {
         parent: &Scope,
         guards: &[Arc<dyn Guard>],
         provided: &[ContextNeed],
-    ) {
+    ) -> Scope {
         let scope = parent.child();
         let mut provided = provided.to_vec();
         for (need, provide) in c.provides {
@@ -248,6 +260,7 @@ impl Assembly {
                     .push(format!("mount prefix {p:?}: prefixes start with `/`")),
             }
         }
+        scope
     }
 }
 
@@ -287,7 +300,10 @@ struct Inner {
     routes: Vec<Route>,
     by_fn_id: HashMap<&'static str, usize>,
     root: Scope,
+    /// The root component's scope (values `OrbicApp::provide` gave).
+    top: Scope,
     state: Shutdown,
+    session_cookie: String,
 }
 
 /// A registered route, for documentation generators.
@@ -325,6 +341,17 @@ impl Pipeline {
     pub fn begin_shutdown(&self) {
         self.inner.state.accepting.store(false, Ordering::SeqCst);
         self.inner.state.wake();
+    }
+
+    /// The session cookie name ([`OrbicApp::session_cookie`]).
+    pub fn session_cookie(&self) -> &str {
+        &self.inner.session_cookie
+    }
+
+    /// A value provided at the app's root (`OrbicApp::provide`), for test
+    /// clients and adapters.
+    pub fn provided<T: Send + Sync + 'static>(&self) -> Option<hyve_core::Ctx<T>> {
+        self.inner.top.get::<T>()
     }
 
     /// Requests currently running.
@@ -453,6 +480,8 @@ impl Inner {
     ) -> Result<crate::request::Payload, HyveError> {
         let (route, params) = self.find(&req)?;
         let scope = route.scope.child();
+        let slot = std::sync::Arc::new(CredentialSlot::default());
+        scope.provide_arc(slot.clone());
         let result = scope
             .scoped(async {
                 let method = route.server_fn.map_or(route.method, |d| d.method);
@@ -489,6 +518,11 @@ impl Inner {
                 let outcome = (route.endpoint)(parts).await;
                 if let Some(r) = reservation {
                     idempotency::finish(r, &outcome);
+                }
+                if outcome.is_ok()
+                    && let Some(update) = slot.take()
+                {
+                    meta.credential_update = Some(update);
                 }
                 outcome
             })

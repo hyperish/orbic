@@ -15,6 +15,26 @@ pub struct User {
     pub name: String,
 }
 
+/// Who a request is authenticated as (the sketch leaves it to the app).
+#[model]
+#[derive(Debug, Clone, PartialEq)]
+pub struct CurrentUser {
+    pub id: Id<User>,
+    pub name: String,
+    pub admin: bool,
+}
+
+#[cfg(feature = "server")]
+impl SessionUser for CurrentUser {
+    fn principal(&self) -> String {
+        self.id.to_string()
+    }
+}
+
+/// The app registers its principal type with `orbic-auth` once.
+#[cfg(feature = "server")]
+pub type AuthGuard = orbic::AuthGuard<CurrentUser>;
+
 /// `docs/01-dx-and-dsl.md` §1 sketch.
 #[model]
 #[table("projects")]

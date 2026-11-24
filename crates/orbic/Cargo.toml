@@ -16,10 +16,11 @@ default = ["server"]
 ## The runtime (pipeline, database, cache). Shared crates depend on orbic
 ## without default features and enable this from their own `server` feature,
 ## so client builds (wasm32 included) link only the macros.
-server = ["dep:orbic-cache", "dep:orbic-core", "dep:orbic-db"]
+server = ["dep:orbic-auth", "dep:orbic-cache", "dep:orbic-core", "dep:orbic-db"]
 
 [dependencies]
 hyve.workspace = true
+orbic-auth = { workspace = true, optional = true }
 orbic-cache = { workspace = true, optional = true }
 orbic-core = { workspace = true, optional = true }
 orbic-db = { workspace = true, optional = true }

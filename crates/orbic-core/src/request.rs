@@ -218,6 +218,34 @@ impl fmt::Debug for CredentialUpdate {
     }
 }
 
+/// Where a handler (through `orbic-auth`'s sign-in and sign-out) asks the
+/// adapter to set or clear the client's session; provided to every request
+/// scope and applied to [`ResponseMeta::credential_update`] when the handler
+/// succeeds.
+#[derive(Debug, Default)]
+pub struct CredentialSlot(std::sync::Mutex<Option<CredentialUpdate>>);
+
+impl CredentialSlot {
+    /// Requests a credential change.
+    pub fn set(&self, update: CredentialUpdate) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(update);
+    }
+
+    pub(crate) fn take(&self) -> Option<CredentialUpdate> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+}
+
+/// The session cookie name when the app does not set one
+/// ([`OrbicApp::session_cookie`](crate::OrbicApp::session_cookie)).
+pub const DEFAULT_SESSION_COOKIE: &str = "hyperish_session";
+
 /// The pipeline's answer.
 #[derive(Debug)]
 pub struct Response {
