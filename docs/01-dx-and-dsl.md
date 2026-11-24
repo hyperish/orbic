@@ -178,6 +178,7 @@ pub fn project_rpc_component() -> BackendComponent {
 
 - **스캐폴딩**: `hyve init --template orbic-service` 또는 리소스·마이그레이션·워커 생성.
 - **로컬 개발·프리뷰 (`hyve preview`)**: 코드 변경 시 서버 재기동 및 로컬 DB/캐시 테스트 하네스 자동 연결.
+  - **구현 (제안, 2026-11-25)**: 서버는 패키지의 `Cargo.toml`에 `[package.metadata.orbic.server]`로 선언합니다(`bin = "<실행 파일>"`, 생략하면 그 패키지의 유일한 실행 파일이나 패키지 이름과 같은 실행 파일, `features = [..]`는 선택). 선언한 패키지가 있을 때만 `hyve-orbic stages`가 `preview`를 답하므로, 서버가 없는 워크스페이스에서 다른 프레임워크의 `preview`를 방해하지 않습니다. `hyve-orbic preview`는 서버를 `cargo build`한 뒤 만들어진 실행 파일을 직접 실행하고(`cargo run`을 거치지 않음), 워크스페이스 멤버의 소스(`target`과 숨김 디렉터리 제외)가 바뀌면 다시 빌드해 실행 파일이 바뀐 서버만 재기동합니다. 재기동은 이전 프로세스를 멈추고 기다린 뒤 새로 띄워 포트 충돌이 없습니다. 빌드가 실패하면 이전 빌드가 계속 돌고, 서버가 스스로 끝나면(패닉, 포트 사용 중) 알린 뒤 다음 소스 변경에서 다시 띄웁니다. `hyve preview` 아래에서는 표준 입력이 닫히면 서버를 멈추고 끝납니다(`hyve/docs/01-dx-and-dsl.md` §2). 첫 빌드가 끝나기 전에는 서버가 없으므로 웹 데브 서버의 API 프록시가 `502`를 냅니다. 로컬 DB/캐시 하네스 자동 연결과 `codegen` 자동 실행은 **미완**입니다.
 - **정적 검증 (`hyve lint`)**: 누락된 권한 검사(`02-core-contracts.md` §6), 취소 토큰 미전파(`§3`), 어댑터 타입의 코어 유입(`§5`)을 정적 검사로 차단.
 - **계약·통합 테스트 (`hyve test`)**: 인메모리 DB/캐시 하네스를 사용해 HTTP/JSON(`03-api-protocol.md`) 및 WS/WT(`04-realtime-communication.md`)의 멱등성·낙관적 잠금·재연결 시나리오를 자동 검증.
 

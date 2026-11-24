@@ -40,6 +40,8 @@ Phase 1(`v0.1.0`)의 작업 순서와 완료 기준입니다. Phase 1에 들어�
   - 7단계: 문서 생성에 필요한 라우트 기술(`RouteShape`)과 가드 기술(`GuardShape`)을 `orbic-core`에 더했습니다(프로토콜 중립, `hyve-validate` 스키마). 그래서 `Valid<T>` 추출자는 `T: Schema`를 요구합니다(`#[model]`은 모두 충족). 완료 기준의 "실제 응답과 일치"는 생성한 문서로 실제 HTTP 응답(성공, 목록, `204`, `400`·`401`·`403`·`404`·`413`·`415`·`422`·`429`)의 본문을 그 상태 코드에 적힌 스키마로 검증하고 적힌 헤더가 오는지 확인하는 테스트로 봅니다. `utoipa`는 포크하지 않고 고정했습니다(`02-architecture.md` §3 실행 기록).
   - 8단계: §1 스케치의 `create_project`는 `user`를 `db.tx(|tx| async move { .. })` 안으로 옮긴 뒤 다시 써서 컴파일되지 않았습니다. 같은 뜻으로 태그를 `created.owner_id`로 무효화하도록 스케치를 고쳤습니다(2단계의 `Id::<Project>::new()`와 같은 종류의 정정). §2 스케치의 `db.insert(Project { .. }).await`가 함수의 결과이므로 `insert`는 행을 값으로 받아 그 행을 돌려줍니다(4단계 API 변경). 인프로세스 전송을 위해 `orbic-core`에 `Pipeline::dispatch_call`(타입이 있는 `#[server]` 호출을 직렬화 없이 파이프라인에 넣음)을 더했고, 전송이 취소된 호출을 끝내는 오류 코드 `cancelled`를 `hyve-api`에 더했습니다(`hyve/docs/02-architecture.md`). 스케치 테스트는 `crates/orbic-tests/tests/sketch.rs`에 문서 그대로(`.room`·`.every` 줄 제외) 있고, 같은 파일에서 단일 파이프라인(`TestClient`와 실제 서버의 응답 비교), 두 레일과 인프로세스(같은 결과·같은 오류·스키마 불일치 폴백), HTTP 규약(커서 페이지 순회, 낙관적 잠금, 처리 중 키의 `409`와 `Retry-After`, 오류 메시지에 내부 이름 없음)을 확인합니다.
 
+- `hyve-orbic preview` (2026-11-25): 서버를 선언한 패키지(`[package.metadata.orbic.server]`)를 빌드·실행하고 소스 변경 시 재기동합니다. 실제 작은 워크스페이스로 `stages`의 `preview` 노출 조건, 시작·재기동(이전 프로세스 종료 확인)·실행 파일이 그대로면 재기동하지 않음·서버의 자체 종료 알림·표준 입력이 닫히면 서버와 함께 멈춤을 확인합니다(`apps/orbic-cli/tests/preview.rs`). 로컬 DB/캐시 하네스 자동 연결과 `codegen` 자동 실행은 **미완**, Windows는 **미검증**입니다.
+
 `.every`(잡)와 L2 캐시는 Phase 2, `.room`(실시간)과 MSA는 Phase 3입니다.
 
 ## 3. 완료 기준
