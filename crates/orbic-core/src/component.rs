@@ -212,20 +212,4 @@ fn request_from_params<M: ServerHandler>(
     from_params::<M::Request>(&pairs, single.as_deref(), "request")
 }
 
-/// Argument names travel as JSON names (`owner_id` → `ownerId`), like the
-/// fields of the generated request model.
-pub fn arg_json_name(name: &str) -> String {
-    let mut out = String::new();
-    let mut upper = false;
-    for c in name.chars() {
-        if c == '_' {
-            upper = !out.is_empty();
-        } else if upper {
-            out.extend(c.to_uppercase());
-            upper = false;
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
+pub use hyve_api::params::arg_json_name;

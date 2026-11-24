@@ -10,14 +10,14 @@ use bytes::Bytes;
 use http::header::{AUTHORIZATION, CONTENT_TYPE, HeaderName, HeaderValue, RETRY_AFTER};
 use http::{HeaderMap, StatusCode};
 use hyve::api::{
-    BoxFuture, Call, ErrorBody, ErrorWire, HEADER_FN, HEADER_SCHEMA, MEDIA_TYPE_BINARY,
-    MEDIA_TYPE_JSON, Method, Rail, Reply, ServerFnDescriptor, Transport, errors,
+    BoxFuture, Call, HEADER_FN, HEADER_SCHEMA, MEDIA_TYPE_JSON, Method, Rail, Reply,
+    ServerFnDescriptor, Transport, errors,
 };
-use hyve::serde::{AlignedBytes, Binary as _, Json, from_json, from_json_data, to_json};
-use hyve::{ErrorKind, HyveError, HyveResult, Value};
+use hyve::serde::{Json, from_json_data, to_json};
+use hyve::{HyveError, HyveResult};
 use orbic_auth::{AuthConfig, Client, SessionUser};
 use orbic_cache::Cache;
-use orbic_core::{OrbicApp, Pipeline, arg_json_name};
+use orbic_core::{OrbicApp, Pipeline};
 
 use crate::{HttpApp, InProcess, http_app};
 
@@ -308,47 +308,14 @@ impl TestResponse {
     }
 }
 
-/// Reads an answer as a transport does (`hyve/docs/03-adapters-and-pipeline.md`
-/// §3.3, §3.4).
+/// Reads an answer as a transport does (`hyve::api::http::decode`).
 fn restore(r: &http::Response<Bytes>) -> HyveResult<Reply> {
-    let binary = r
-        .headers()
-        .get(CONTENT_TYPE)
-        .is_some_and(|v| v.as_bytes() == MEDIA_TYPE_BINARY.as_bytes());
-    let status = r.status();
-    if binary {
-        let bytes = AlignedBytes::copy_from(r.body());
-        if status.is_success() {
-            return Ok(Reply::Binary(bytes));
-        }
-        let wire = ErrorWire::from_binary(&bytes)
-            .map_err(|e| errors::decode_failed(format!("unreadable binary error: {e}")))?;
-        return Err(wire.into());
-    }
-    let text = std::str::from_utf8(r.body())
-        .map_err(|_| errors::decode_failed("the answer is not UTF-8"))?;
-    if status == StatusCode::NO_CONTENT {
-        return Ok(Reply::NoContent);
-    }
-    if status.is_success() {
-        return Ok(Reply::Json(text.to_owned()));
-    }
-    let kind = if status.is_client_error() {
-        ErrorKind::Domain
-    } else if status == StatusCode::SERVICE_UNAVAILABLE {
-        ErrorKind::Infra
-    } else {
-        ErrorKind::Internal
-    };
-    let retryable = r.headers().contains_key(RETRY_AFTER);
-    let envelope: Value = from_json(text)
-        .map_err(|e| errors::decode_failed(format!("not an error envelope ({status}): {e}")))?;
-    let body = envelope
-        .get("error")
-        .map(|e| from_json::<ErrorBody>(&hyve::serde::to_json(e)))
-        .ok_or_else(|| errors::decode_failed(format!("not an error envelope ({status})")))?
-        .map_err(|e| errors::decode_failed(format!("not an error envelope ({status}): {e}")))?;
-    Err(body.into_error(kind, retryable))
+    hyve::api::http::decode(hyve::api::http::HttpAnswer {
+        status: r.status().as_u16(),
+        content_type: r.headers().get(CONTENT_TYPE).and_then(|v| v.to_str().ok()),
+        retry_after: r.headers().contains_key(RETRY_AFTER),
+        body: r.body(),
+    })
 }
 
 /// `#[server]` calls over the HTTP translation, on one rail.
@@ -372,52 +339,47 @@ impl Transport for HttpTransport {
 
 impl HttpTransport {
     async fn run(&self, call: Call) -> HyveResult<Reply> {
-        let d = call.descriptor();
-        let pattern = self.client.path_of(d);
-        let model: Value = from_json(&call.encode_json())
-            .map_err(|e| HyveError::internal(format!("the request model is not JSON: {e}")))?;
-        let params = Params::new(d, model);
+        let pattern = self.client.path_of(call.descriptor());
         if self.rail == Rail::Fast {
-            let body = call.encode_binary()?;
-            let fingerprint = self.fingerprint.unwrap_or(d.fingerprint);
-            let mut request = http::Request::new(Bytes::from(body.into_vec()));
-            *request.method_mut() = http::Method::POST;
-            *request.uri_mut() = params.path(&pattern, false)?;
-            let h = request.headers_mut();
-            h.insert(CONTENT_TYPE, HeaderValue::from_static(MEDIA_TYPE_BINARY));
-            h.insert(
-                HEADER_FN,
-                HeaderValue::from_str(d.id).expect("ids are header-safe"),
-            );
-            h.insert(
-                HEADER_SCHEMA,
-                HeaderValue::from_str(&format!("{fingerprint:016x}")).expect("hex"),
-            );
-            self.authenticate(h);
-            let r = self.client.send_http(request).await.into_inner();
-            if r.status() != StatusCode::UNSUPPORTED_MEDIA_TYPE {
+            let r = self
+                .send(hyve::api::http::encode(
+                    &call,
+                    Rail::Fast,
+                    &pattern,
+                    self.fingerprint,
+                )?)
+                .await;
+            if !hyve::api::http::wants_standard_rail(r.status().as_u16()) {
                 return restore(&r);
             }
             // The server cannot take this binary request: once on the
             // standard rail, whatever the code (§3.3).
             self.client.fallbacks.fetch_add(1, Ordering::SeqCst);
         }
-        let bodyless = matches!(d.method, Method::Get | Method::Delete);
-        let mut request = http::Request::new(if bodyless || d.args.is_empty() {
-            Bytes::new()
-        } else {
-            Bytes::from(call.encode_json())
-        });
+        let r = self
+            .send(hyve::api::http::encode(
+                &call,
+                Rail::Standard,
+                &pattern,
+                None,
+            )?)
+            .await;
+        restore(&r)
+    }
+
+    async fn send(&self, req: hyve::api::http::HttpRequest) -> http::Response<Bytes> {
+        let mut request = http::Request::new(Bytes::from(req.body));
         *request.method_mut() =
-            http::Method::from_bytes(d.method.as_str().as_bytes()).expect("a valid method");
-        *request.uri_mut() = params.path(&pattern, bodyless)?;
-        if !request.body().is_empty() {
-            request
-                .headers_mut()
-                .insert(CONTENT_TYPE, HeaderValue::from_static(MEDIA_TYPE_JSON));
+            http::Method::from_bytes(req.method.as_str().as_bytes()).expect("a valid method");
+        *request.uri_mut() = req.path.parse().expect("encoded paths are valid URIs");
+        for (name, value) in req.headers {
+            request.headers_mut().insert(
+                HeaderName::from_static(lower(name)),
+                HeaderValue::from_str(&value).expect("header-safe values"),
+            );
         }
         self.authenticate(request.headers_mut());
-        restore(&self.client.send_http(request).await.into_inner())
+        self.client.send_http(request).await.into_inner()
     }
 
     fn authenticate(&self, h: &mut HeaderMap) {
@@ -427,76 +389,12 @@ impl HttpTransport {
     }
 }
 
-/// The request model as named values, for path placeholders and (for
-/// `GET`/`DELETE`) the query string (`docs/01-dx-and-dsl.md` §2).
-struct Params(Vec<(String, Value)>);
-
-impl Params {
-    fn new(d: &ServerFnDescriptor, model: Value) -> Params {
-        match model {
-            _ if d.args.is_empty() => Params(Vec::new()),
-            Value::Map(fields) => Params(fields),
-            single => Params(vec![(arg_json_name(d.args[0]), single)]),
-        }
+/// `http::HeaderName::from_static` takes lowercase names.
+fn lower(name: &'static str) -> &'static str {
+    match name {
+        "Content-Type" => "content-type",
+        n if n == HEADER_FN => "hyperish-fn",
+        n if n == HEADER_SCHEMA => "hyperish-schema",
+        n => n,
     }
-
-    fn path(&self, pattern: &str, with_query: bool) -> HyveResult<http::Uri> {
-        let mut path = String::new();
-        let mut used = Vec::new();
-        let mut rest = pattern;
-        while let Some(start) = rest.find('{') {
-            path.push_str(&rest[..start]);
-            let end = rest[start..].find('}').map_or(rest.len(), |e| start + e);
-            let name = rest[start + 1..end].trim_start_matches('*');
-            let value = self.0.iter().find(|(k, _)| k == name).ok_or_else(|| {
-                HyveError::invalid_request(format!("the call has no `{name}` for the path"))
-            })?;
-            path.push_str(&encode(&scalar(&value.1)?));
-            used.push(name.to_owned());
-            rest = &rest[(end + 1).min(rest.len())..];
-        }
-        path.push_str(rest);
-        if with_query {
-            let mut query = Vec::new();
-            for (k, v) in self.0.iter().filter(|(k, _)| !used.contains(k)) {
-                match v {
-                    Value::Null => {}
-                    Value::List(items) => {
-                        for item in items {
-                            query.push(format!("{}={}", encode(k), encode(&scalar(item)?)));
-                        }
-                    }
-                    v => query.push(format!("{}={}", encode(k), encode(&scalar(v)?))),
-                }
-            }
-            if !query.is_empty() {
-                path.push('?');
-                path.push_str(&query.join("&"));
-            }
-        }
-        path.parse()
-            .map_err(|e| HyveError::internal(format!("bad request URI `{path}`: {e}")))
-    }
-}
-
-fn scalar(v: &Value) -> HyveResult<String> {
-    match v {
-        Value::String(s) => Ok(s.clone()),
-        Value::Bool(_) | Value::Int(_) | Value::Float(_) => Ok(to_json(v)),
-        other => Err(HyveError::invalid_request(format!(
-            "{other:?} cannot travel in a path or query string"
-        ))),
-    }
-}
-
-fn encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
-            out.push(char::from(b));
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
 }

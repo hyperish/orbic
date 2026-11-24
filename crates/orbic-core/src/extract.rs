@@ -4,10 +4,10 @@
 use std::any::Any;
 
 use hyve_api::{ContextNeed, Path, Query};
-use hyve_core::{Ctx, HyveError, Scope, Value};
+use hyve_core::{Ctx, HyveError, Scope};
 use hyve_serde::json::from_json_bytes;
-use hyve_serde::{Binary, DecodeError, Json, from_json, to_json};
-use hyve_validate::{Definition, Schema, SchemaNode, SchemaRegistry, Valid, Validate};
+use hyve_serde::{Binary, DecodeError, Json};
+use hyve_validate::{Schema, SchemaNode, SchemaRegistry, Valid, Validate};
 
 use crate::request::{Body, Rail, RequestMeta};
 
@@ -176,154 +176,7 @@ pub(crate) fn downcast<T: 'static>(v: Box<dyn Any + Send>) -> Result<T, HyveErro
     })
 }
 
-/// Splits and percent-decodes `a=1&b=x`.
-pub fn parse_query(query: &str) -> Result<Vec<(String, String)>, HyveError> {
-    let mut out = Vec::new();
-    for part in query.split('&').filter(|p| !p.is_empty()) {
-        let (k, v) = part.split_once('=').unwrap_or((part, ""));
-        out.push((percent_decode(k)?, percent_decode(v)?));
-    }
-    Ok(out)
-}
-
-fn percent_decode(s: &str) -> Result<String, HyveError> {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'+' => out.push(b' '),
-            b'%' => {
-                let hex = s
-                    .get(i + 1..i + 3)
-                    .and_then(|h| u8::from_str_radix(h, 16).ok());
-                let Some(byte) = hex else {
-                    return Err(HyveError::invalid_request(format!(
-                        "invalid percent-encoding in `{s}`"
-                    )));
-                };
-                out.push(byte);
-                i += 2;
-            }
-            c => out.push(c),
-        }
-        i += 1;
-    }
-    String::from_utf8(out)
-        .map_err(|_| HyveError::invalid_request(format!("`{s}` is not valid UTF-8 once decoded")))
-}
-
-/// Builds `T` from text parameters, guided by its schema. A model takes its
-/// fields by JSON name (lists repeat the parameter); any other type reads
-/// the single parameter `single` (or the only one present).
-pub fn from_params<T: Json + Schema>(
-    pairs: &[(String, String)],
-    single: Option<&str>,
-    what: &str,
-) -> Result<T, HyveError> {
-    let mut reg = SchemaRegistry::new();
-    let node = T::schema(&mut reg);
-    let value = match object_fields(&reg, &node) {
-        Some(fields) => {
-            let mut map = Vec::new();
-            for f in fields {
-                let values: Vec<&str> = pairs
-                    .iter()
-                    .filter(|(k, _)| k == f.json_name)
-                    .map(|(_, v)| v.as_str())
-                    .collect();
-                if values.is_empty() {
-                    continue;
-                }
-                map.push((
-                    f.json_name.to_owned(),
-                    param_value(&f.schema, &values, f.json_name, what)?,
-                ));
-            }
-            Value::Map(map)
-        }
-        None => {
-            let values: Vec<&str> = match single {
-                Some(name) => pairs
-                    .iter()
-                    .filter(|(k, _)| k == name)
-                    .map(|(_, v)| v.as_str())
-                    .collect(),
-                None => pairs.iter().map(|(_, v)| v.as_str()).collect(),
-            };
-            if values.is_empty() {
-                return Err(HyveError::invalid_request(format!(
-                    "missing {what} parameter `{}`",
-                    single.unwrap_or("value")
-                )));
-            }
-            param_value(&node, &values, single.unwrap_or("value"), what)?
-        }
-    };
-    from_json::<T>(&to_json(&value)).map_err(|e| {
-        let at = e.path().strip_prefix("$.").unwrap_or(e.path());
-        HyveError::invalid_request(format!("invalid {what} parameter `{at}`: {}", e.message()))
-    })
-}
-
-fn object_fields<'r>(
-    reg: &'r SchemaRegistry,
-    node: &SchemaNode,
-) -> Option<&'r [hyve_validate::FieldSchema]> {
-    match node {
-        SchemaNode::Ref(name) => match reg.get(name) {
-            Some(Definition::Object(fields)) => Some(fields),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn param_value(
-    node: &SchemaNode,
-    values: &[&str],
-    name: &str,
-    what: &str,
-) -> Result<Value, HyveError> {
-    let bad = |expected: &str, v: &str| {
-        HyveError::invalid_request(format!(
-            "invalid {what} parameter `{name}`: expected {expected}, found `{v}`"
-        ))
-    };
-    if let SchemaNode::List { items, .. } = node {
-        return values
-            .iter()
-            .map(|v| param_value(items, &[v], name, what))
-            .collect::<Result<_, _>>()
-            .map(Value::List);
-    }
-    let [v] = values else {
-        return Err(HyveError::invalid_request(format!(
-            "{what} parameter `{name}` is repeated"
-        )));
-    };
-    Ok(match node {
-        SchemaNode::Nullable(inner) => return param_value(inner, values, name, what),
-        SchemaNode::Bool => match *v {
-            "true" => Value::Bool(true),
-            "false" => Value::Bool(false),
-            _ => return Err(bad("`true` or `false`", v)),
-        },
-        SchemaNode::Integer { signed: true, .. } => v
-            .parse::<i64>()
-            .map(Value::Int)
-            .map_err(|_| bad("an integer", v))?,
-        SchemaNode::Integer { signed: false, .. } => match v.parse::<u64>() {
-            Ok(n) => i64::try_from(n).map(Value::Int).unwrap_or(Value::UInt(n)),
-            Err(_) => return Err(bad("a non-negative integer", v)),
-        },
-        SchemaNode::Float { .. } => v
-            .parse::<f64>()
-            .map(Value::Float)
-            .map_err(|_| bad("a number", v))?,
-        _ => Value::String((*v).to_owned()),
-    })
-}
+pub use hyve_api::params::{from_params, parse_query};
 
 #[cfg(test)]
 mod tests {
