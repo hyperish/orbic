@@ -10,10 +10,11 @@
 orbic/
   apps/
     orbic-bench/           # 백엔드 처리량·지연시간·룸 동시성 벤치마크 및 검증 러너
+    orbic-cli/             # `hyve-orbic` 실행 파일 (`hyve`가 호출하는 `codegen` 등 도구 단계)
   crates/
     orbic/                 # 사용자 진입 크레이트 (단일 의존성 재수출 + prelude + TestClient)
     orbic-core/            # BackendComponent 트리(`provide`, `wrap`, `mount`), `Ctx<T>`, 전송 중립 요청 파이프라인, Graceful Shutdown 조율
-    orbic-macros/          # 라우트·컴포넌트·테이블(`#[table]`)·`sql!`·워커·룸 보조 proc macro
+    orbic-macros/          # `#[table]`·`#[pk]`·`sql!`·`ttl!`·`key!`·`tag!` (조립은 매크로가 아니라 체이닝)
     orbic-auth/            # 웹(HttpOnly 쿠키+CSRF) & 네이티브/CLI(Bearer) 통합 Opaque 세션, RBAC `AuthGuard`, 권위 저장소 직결 즉시 철회
     orbic-db/              # 경량 타입 안전 체이닝 + 오프라인 검증 `sql!` 매크로, 커넥션 풀, 트랜잭션, 마이그레이션 (Postgres, SQLite/LibSQL)
     orbic-cache/           # L1(인메모리) + L2(Redis/Valkey) Tiered 캐시, Singleflight, 태그 무효화, 멱등 키, `RateLimit`
@@ -49,7 +50,9 @@ orbic/
 | 모듈 | 베이스 크레이트 (확인 버전 · 라이선스) | 포크 후 내부 코어 개조(1·2단계 `unit optimization`) 방향 |
 |---|---|---|
 | `orbic-adapter-http` · `orbic-core` | `hyper` (`1.12.0`, `MIT`) + `matchit` (`0.9.2`, `MIT AND BSD-3-Clause`, 외부 의존성) | `axum`/`tower`의 `BoxService`·레이어 중첩 오버헤드를 도입하지 않고 `hyper` HTTP 코어(`orbic-adapter-http`)와 Radix 라우터(`orbic-core` 라우트 트리)를 `BackendComponent`에 직결 |
-| `orbic-db` | `sqlx-core` (`0.9.1`, `MIT OR Apache-2.0`) | `Any` 드라이버·미사용 DB 코드 전면 제거 → `#[model]`/`#[table]` 컬럼 레이아웃에 **제로카피 Row → Struct 직접 디코딩** 및 Postgres 파이프라이닝 직결 |
+| `orbic-db` | `sqlx-core` (`0.9.1`, `MIT OR Apache-2.0`) + 같은 저장소의 드라이버 `sqlx-postgres`·`sqlx-sqlite` (각 `0.9.1`, `MIT OR Apache-2.0`) | `Any` 드라이버·미사용 DB 코드 전면 제거 → `#[model]`/`#[table]` 컬럼 레이아웃에 **제로카피 Row → Struct 직접 디코딩** 및 Postgres 파이프라이닝 직결 |
 | `orbic-cache` | L1 `quick_cache` (`0.7.0`, `MIT`), L2 `fred` (`10.1.0`, `MIT`) | `quick_cache`(S3-FIFO)에 Singleflight·태그 인덱스 직결; `fred`는 범용 클러스터/타입 변환 계층을 덜어내고 RESP3 파이프라이닝·`rkyv` 무복사 바이트 버퍼·Client-Side Invalidation만 남김 |
 | `orbic-adapter-ws` | `quinn` (`0.11.12`, `MIT OR Apache-2.0`) + `wtransport` (`0.7.2`, `MIT OR Apache-2.0`), `tokio-tungstenite` (`0.30.0`, `MIT`) | 고속 레일은 WebTransport(QUIC) 1순위이고 WS 폴백에서도 `hyve-serde`(`rkyv`) 바이너리 프레임을 유지, 표준 레일 WS는 04 규약의 JSON 텍스트 프레임 |
 | `orbic-openapi` | `utoipa` (`6.0.0`, `MIT OR Apache-2.0`) | OpenAPI 3.1 스키마 모델만 경량 채택해 `hyve-validate` 리플렉션과 직결 |
+
+외부 의존성(포크하지 않음, 2026-11-24 `cargo info` 확인): 패밀리 네이티브 런타임 `tokio` (`1.54.1`, `MIT` — `hyve/docs/02-architecture.md` §2.5), 라우터 `matchit`(위 표). 이 목록에 없는 의존성은 `hyperish/docs` `05-development-rules.md` §7의 외부 의존성 규칙에 따라 추가 기록합니다.
