@@ -1,0 +1,1 @@
+{"sql":"SELECT id, title FROM projects","params":[],"columns":[{"name":"id","type":"text","nullable":false},{"name":"title","type":"text","nullable":false}],"dialects":["sqlite"]}

@@ -1,0 +1,23 @@
+error[E0277]: `u32` cannot be bound to this `sql!` parameter
+ --> tests/ui-server/sql_bind.rs:3:13
+  |
+3 |     let _ = orbic::sql!(orbic_tests::Project, "SELECT * FROM projects WHERE owner_id = $1", 7u32);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the offline cache records a different type for this parameter
+  |
+  = note: text: `String`, `&str`, `Ulid`, `Id<T>`; int: integers up to `i64`/`u32`; float: `f32`, `f64`; bool; bytes: `Vec<u8>`, `&[u8]`; timestamp: `Timestamp`; `Option` of any binds NULL
+help: the trait `Encode<orbic::__private::orbic_db::types::Text>` is not implemented for `u32`
+      but trait `Encode<orbic::__private::orbic_db::types::Int>` is implemented for it
+ --> $WORKSPACE/crates/orbic-db/src/sql.rs
+  |
+  |         impl Encode<types::Int> for $t {
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  | encode_ints!(i8, i16, i32, i64, u8, u16, u32);
+  | --------------------------------------------- in this macro invocation
+  = help: for that trait implementation, expected `orbic::__private::orbic_db::types::Int`, found `orbic::__private::orbic_db::types::Text`
+note: required by a bound in `orbic::__private::orbic_db::bind`
+ --> $WORKSPACE/crates/orbic-db/src/sql.rs
+  |
+  | pub fn bind<M, V: Encode<M> + ?Sized>(value: &V) -> DbValue {
+  |                   ^^^^^^^^^ required by this bound in `bind`
+  = note: this error originates in the macro `orbic::sql` which comes from the expansion of the macro `encode_ints` (in Nightly builds, run with -Z macro-backtrace for more info)

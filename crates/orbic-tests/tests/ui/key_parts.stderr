@@ -1,0 +1,22 @@
+error: `key!` needs at least one part
+         = help: write `key!("projects", user.id)`
+ --> tests/ui/key_parts.rs:2:13
+  |
+2 |     let _ = orbic::key!();
+  |             ^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `orbic::key` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: `key!` parts cannot be empty
+         = help: name the part, e.g. `"projects"`
+ --> tests/ui/key_parts.rs:3:25
+  |
+3 |     let _ = orbic::key!("");
+  |                         ^^
+
+error: this literal cannot be part of a `tag!`
+         = help: use a string, an integer or a boolean
+ --> tests/ui/key_parts.rs:4:30
+  |
+4 |     let _ = orbic::tag!("a", 1.5);
+  |                              ^^^

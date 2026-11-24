@@ -19,10 +19,10 @@
 - **`wrap`의 순서**: 가드는 선언한 순서대로 바깥에서 안쪽으로 실행하며(먼저 `wrap`한 가드가 먼저 실행), `mount`가 여러 겹이어도 한 요청에서 각 가드는 정확히 한 번 실행됩니다.
 - **추출자**: 핸들러 인자는 `Ctx<T>`(주입), `Valid<T>`(본문), `Query<T>`(쿼리), `Path<T>`(경로 파라미터)입니다. 반환한 `OrbicResult<T>`는 `hyperish/docs` `03-api-protocol.md` §4의 봉투로 변환됩니다.
 - **쿼리와 경로 파라미터 (제안, 2026-11-24)**: `Query<T>`와 `Path<T>`는 `T`가 모델이면 필드를 JSON 이름(`camelCase`)의 파라미터로 받고, 목록 필드는 파라미터를 반복합니다(`?tag=a&tag=b`). 모델이 아닌 값 하나(`Path<Id<Project>>`)는 그 자리의 파라미터 하나를 읽습니다. 값은 필드의 스키마에 따라 정수·실수·`true`/`false`·문자열로 읽고, 읽을 수 없으면 파라미터 이름이 담긴 `400 invalid_request`입니다. 파라미터에는 중첩 모델을 담지 않습니다.
-- **리터럴**: `ttl!`, `key!`, `tag!`의 리터럴은 컴파일 타임에, `.every("1h")` 같은 조립 인자는 조립 시점에 검증합니다. 해석할 수 없는 값을 기본값으로 대체하지 않습니다. `key!`와 `tag!`는 구성 요소가 구분자와 충돌하지 않게 인코딩합니다.
+- **리터럴**: `ttl!`, `key!`, `tag!`의 리터럴은 컴파일 타임에, `.every("1h")` 같은 조립 인자는 조립 시점에 검증합니다. 해석할 수 없는 값을 기본값으로 대체하지 않습니다. `key!`와 `tag!`는 구성 요소가 구분자와 충돌하지 않게 인코딩합니다(제안, 2026-11-24: 구성 요소를 `:`로 잇고, 구성 요소 안의 `\`와 `:`는 `\\`와 `\:`로, 값이 없는 `Option`은 이스케이프 결과에 나올 수 없는 `\-`로 씁니다).
 - **OpenAPI**: 생성되는 문서는 실제 와이어 형식을 그대로 기술합니다. 응답 봉투, 오류 응답, 인증 요구가 포함됩니다.
 - **심볼의 소유**: `Id<T>`, `HyveResult<T>`, `Ctx<T>`, `Valid<T>`, `Path<T>`, `Query<T>`, `Page<T>`, `CursorParams`는 `hyve`의 것이고 `orbic`은 재수출만 합니다. `Page<T>`와 `CursorParams`는 `hyperish/docs` `03-api-protocol.md` §4·§5의 목록 응답과 커서 요청에 대응하며, 공유 크레이트의 `#[server]` 함수도 쓸 수 있습니다. `OrbicResult<T>`는 `HyveResult<T>`의 별칭이라 계층 사이에 오류 변환이 없습니다. `CurrentUser`와 `User`는 앱이 정의하는 모델입니다. 앱이 인증 주체 타입(`CurrentUser`)을 `orbic-auth`에 등록하면 `orbic-auth`가 세션에 저장했다가 요청 스코프에 주입하고, `.as_user(...)`도 그 타입의 값을 받습니다.
-- **공유 모델의 `#[table]`**: `#[table]`과 `#[pk]`는 `orbic-macros`의 속성이며 테이블 메타데이터만 만듭니다. 생성물은 `#[server]`와 같은 기준으로 `server` 피처가 켜진 빌드에만 남습니다(§2). 공유 크레이트는 진입 크레이트 `orbic`을 기본 피처를 끈 채 의존합니다. 이 상태의 `orbic`은 매크로와 메타데이터 타입만 내보내고 `wasm32`에서도 빌드되며, 런타임(DB, HTTP, `tokio`)은 `orbic`의 `server` 피처에 있습니다. 그래서 클라이언트 빌드는 DB 코드를 링크하지 않습니다.
+- **공유 모델의 `#[table]`**: `#[table]`과 `#[pk]`는 `orbic-macros`의 속성이며 테이블 메타데이터만 만듭니다. 생성물은 `#[server]`와 같은 기준으로 `server` 피처가 켜진 빌드에만 남습니다(§2). 공유 크레이트는 진입 크레이트 `orbic`을 기본 피처를 끈 채 의존합니다. 이 상태의 `orbic`은 매크로와 `OrbicResult`만 내보내고(테이블 메타데이터는 `server` 빌드에만 생기므로 그 타입도 런타임 쪽에 있습니다) `wasm32`에서도 빌드되며, 런타임(DB, HTTP, `tokio`)은 `orbic`의 `server` 피처에 있습니다. 그래서 클라이언트 빌드는 DB 코드를 링크하지 않습니다.
 - **`RateLimit`의 키**: 인증 주체가 있으면 그 주체, 없으면 클라이언트 주소를 키로 하고, 범위는 `wrap`한 컴포넌트입니다. `AuthGuard`보다 먼저 `wrap`하면 인증 전이므로 주소 기준으로만 셉니다.
 - **인증 엔드포인트**: `orbic-auth`는 세션 발급·조회·회전·철회와 `AuthGuard`를 제공하고, 로그인·로그아웃 라우트는 앱이 정의해 이를 호출합니다. Phase 1은 라우트를 내장하지 않습니다. 세션 쿠키 이름은 `orbic-auth` 설정으로 정하며 기본값은 구현이 문서화합니다.
 - **낙관적 잠금**: Phase 1은 전용 API를 두지 않습니다. 요청 모델의 `expectedVersion`과 체이닝 쿼리의 조건부 갱신으로 구현하고, 갱신된 행이 없으면 핸들러가 `Domain` 오류 `version_conflict`를 돌려줍니다.
@@ -100,7 +100,7 @@ async fn create_project(
             Project,
             "INSERT INTO projects (id, owner_id, title, is_public, version)
              VALUES ($1, $2, $3, $4, 1) RETURNING *",
-            Id::new(), user.id, data.title, data.is_public
+            Id::<Project>::new(), user.id, data.title, data.is_public
         )
         .fetch_one(tx)
         .await
@@ -188,4 +188,5 @@ pub fn project_rpc_component() -> BackendComponent {
 - **낡은 캐시**: CI에서 `hyve codegen`의 점검으로 캐시가 현재 마이그레이션·쿼리와 일치하는지 확인합니다. 컴파일 타임에 스키마 지문을 비교해 낡은 캐시를 막는 방식은 **제안**입니다.
 - **방언**: `Db::in_memory()`는 SQLite 인메모리 DB입니다. 체이닝 쿼리는 지원 방언 전체에 이식됩니다. `sql!`은 프로젝트의 운영 방언에서 반드시 검증되고, SQLite에서도 검증을 시도해 통과한 방언을 캐시에 기록합니다. 검증되지 않은 방언의 DB에서 `sql!`을 실행하면 쿼리를 엔진에 보내지 않고 명시적 오류를 돌려줍니다. 운영 방언 전용 쿼리의 테스트는 임시 PostgreSQL 하네스에서 돌립니다. 이 구분에 새 `sql!` 문법은 필요하지 않습니다.
 - **설정과 위치 (제안)**: 운영 방언은 `hyve.toml`의 `[orbic] dialect`(`postgres` 또는 `sqlite`)에 선언합니다. 캐시는 워크스페이스 루트의 `.orbic/sql/`에 쿼리별 파일로 두며, 파일 형식은 `orbic` 내부 규약입니다. 마이그레이션은 워크스페이스 루트의 `migrations/`에 둔 `.sql` 파일을 이름순으로 적용합니다.
-- **실행 주체 (제안)**: 캐시 생성과 점검은 `orbic`이 제공하는 `hyve-orbic` 실행 파일의 `codegen` 단계이고, `hyve codegen`이 이를 호출합니다(`hyve/docs/01-dx-and-dsl.md` §2). 캐시를 만들 때는 `sql!`이 빠진 캐시를 오류로 보지 않고 쿼리 목록만 내보내도록 `hyve-orbic`이 빌드를 구동합니다. 임시 PostgreSQL의 접속 정보는 환경 변수 `HYPERISH_TEST_POSTGRES_URL`로 받고, 하네스는 그 서버에 실행마다 격리된 임시 데이터베이스를 만들었다가 지웁니다. 변수가 없으면 PostgreSQL이 필요한 단계와 테스트는 건너뛰지 않고 실패합니다.
+- **캐시 파일과 매크로 (제안, 2026-11-24)**: 쿼리 하나는 `.orbic/sql/<쿼리 원문 FNV-1a 해시 16자리>.json` 파일 하나이며, 원문·파라미터 타입·결과 컬럼(이름, 타입, 널 가능성)·검증된 방언을 담습니다. 형식은 `orbic-sql-cache` 크레이트에 있고 매크로와 `hyve-orbic`이 함께 씁니다. 타입은 `bool`·`int`·`float`·`text`·`bytes`·`timestamp`입니다. 매크로는 인자를 캐시가 기록한 파라미터 타입으로 묶고(맞지 않는 Rust 타입은 컴파일 오류), 모델이 있으면 결과 컬럼이 모델 필드를 빠짐없이 덮는지, 타입이 같은지, 널 가능한 컬럼이 `Option` 필드인지를 상수 평가로 확인합니다. 결과 컬럼이 있는 쿼리에 모델을 적지 않으면 오류입니다. 캐시 파일이 바뀌면 그 파일을 쓰는 크레이트가 다시 컴파일됩니다.
+- **실행 주체 (제안)**: 캐시 생성과 점검은 `orbic`이 제공하는 `hyve-orbic` 실행 파일의 `codegen` 단계이고, `hyve codegen`이 이를 호출합니다(`hyve/docs/01-dx-and-dsl.md` §2). 캐시를 만들 때는 `sql!`이 빠진 캐시를 오류로 보지 않고 쿼리 목록만 내보내도록 `hyve-orbic`이 빌드를 구동합니다(환경 변수 `HYPERISH_ORBIC_SQL_COLLECT`에 디렉터리를 주면 매크로가 쿼리 원문을 그곳에 쓰고, 어느 방언에서도 검증되지 않은 쿼리로 펼칩니다). 임시 PostgreSQL의 접속 정보는 환경 변수 `HYPERISH_TEST_POSTGRES_URL`로 받고, 하네스는 그 서버에 실행마다 격리된 임시 데이터베이스를 만들었다가 지웁니다. 변수가 없으면 PostgreSQL이 필요한 단계와 테스트는 건너뛰지 않고 실패합니다.

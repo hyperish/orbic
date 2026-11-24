@@ -6,15 +6,24 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 readme = "../../README.md"
 keywords = ["hyperish", "backend", "web", "framework", "api"]
 categories = ["web-programming::http-server", "asynchronous"]
 
+[features]
+default = ["server"]
+## The runtime (pipeline, database, cache). Shared crates depend on orbic
+## without default features and enable this from their own `server` feature,
+## so client builds (wasm32 included) link only the macros.
+server = ["dep:orbic-cache", "dep:orbic-core", "dep:orbic-db"]
+
 [dependencies]
-hyve = { git = "https://github.com/hyperish/hyve.git", branch = "main" }
-orbic-macros = { path = "../orbic-macros", version = "0.0.1-alpha.0" }
+hyve.workspace = true
+orbic-cache = { workspace = true, optional = true }
+orbic-core = { workspace = true, optional = true }
+orbic-db = { workspace = true, optional = true }
+orbic-macros.workspace = true
 
 [lints]
 workspace = true

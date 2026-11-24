@@ -49,6 +49,11 @@ jobs:
         run: |
           cargo clippy -p orbic-tests --all-targets --features server --locked -- -D warnings
           cargo test -p orbic-tests --features server --locked
+      # Client builds of shared crates link only the macros (docs/01 §1).
+      - name: Check the client build on wasm32
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo check -p orbic-tests --target wasm32-unknown-unknown --locked
 
   msrv:
     name: Build on the declared minimum Rust version

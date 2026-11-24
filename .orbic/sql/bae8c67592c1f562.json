@@ -1,0 +1,1 @@
+{"sql":"SELECT id, owner_id, title, is_public, version FROM projects LEFT JOIN x","params":[],"columns":[{"name":"id","type":"text","nullable":false},{"name":"owner_id","type":"text","nullable":false},{"name":"title","type":"text","nullable":true},{"name":"is_public","type":"bool","nullable":false},{"name":"version","type":"int","nullable":false}],"dialects":["sqlite"]}

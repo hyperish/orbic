@@ -1,0 +1,15 @@
+[package]
+name = "orbic-cache"
+description = "Cache keys and tags, in-memory cache with Singleflight and tag invalidation, idempotency and rate-limit stores for orbic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hyve-core.workspace = true
+
+[lints]
+workspace = true

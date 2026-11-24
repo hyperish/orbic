@@ -11,13 +11,15 @@ publish = false
 
 [features]
 ## Plays an app's `server` feature: keeps `#[server]` handler bodies.
-server = []
+server = ["orbic/server"]
 
 [dependencies]
 hyve = { workspace = true, features = ["test"] }
+orbic.workspace = true
 
 [dev-dependencies]
 orbic-core.workspace = true
+trybuild.workspace = true
 
 [lints]
 workspace = true

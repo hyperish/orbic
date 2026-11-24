@@ -5,6 +5,29 @@
 #![allow(missing_docs)]
 
 use hyve::prelude::*;
+use orbic::prelude::*;
+
+/// A user of the app (the docs' sketches leave it to the app).
+#[model]
+#[derive(Debug, Clone, PartialEq)]
+pub struct User {
+    pub id: Id<User>,
+    pub name: String,
+}
+
+/// `docs/01-dx-and-dsl.md` §1 sketch.
+#[model]
+#[table("projects")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Project {
+    #[pk]
+    pub id: Id<Project>,
+    pub owner_id: Id<User>,
+    #[validate(len = 1..=80)]
+    pub title: String,
+    pub is_public: bool,
+    pub version: i64,
+}
 
 #[model]
 #[derive(Debug, Clone, PartialEq)]

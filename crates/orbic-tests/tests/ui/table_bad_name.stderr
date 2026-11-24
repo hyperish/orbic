@@ -1,0 +1,15 @@
+error: invalid table name "Notes"
+         = help: use lower-case `snake_case`, plural (`projects`), per hyperish/docs 06-naming-conventions.md
+ --> tests/ui/table_bad_name.rs:1:16
+  |
+1 | #[orbic::table("Notes")]
+  |                ^^^^^^^
+
+error: `#[table]` takes the table name as a string literal
+         = help: write `#[table("projects")]` above a `#[model]` struct, with `#[pk]` on its primary-key field
+ --> tests/ui/table_bad_name.rs:7:1
+  |
+7 | #[orbic::table]
+  | ^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `orbic::table` (in Nightly builds, run with -Z macro-backtrace for more info)

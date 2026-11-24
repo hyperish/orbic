@@ -15,6 +15,7 @@ orbic/
     orbic/                 # 사용자 진입 크레이트 (단일 의존성 재수출 + prelude + TestClient)
     orbic-core/            # BackendComponent 트리(`provide`, `wrap`, `mount`), `Ctx<T>`, 전송 중립 요청 파이프라인, Graceful Shutdown 조율
     orbic-macros/          # `#[table]`·`#[pk]`·`sql!`·`ttl!`·`key!`·`tag!` (조립은 매크로가 아니라 체이닝)
+    orbic-sql-cache/       # `sql!` 오프라인 캐시의 파일 형식 (`orbic-macros`와 `hyve-orbic codegen`이 공유)
     orbic-auth/            # 웹(HttpOnly 쿠키+CSRF) & 네이티브/CLI(Bearer) 통합 Opaque 세션, RBAC `AuthGuard`, 권위 저장소 직결 즉시 철회
     orbic-db/              # 경량 타입 안전 체이닝 + 오프라인 검증 `sql!` 매크로, 커넥션 풀, 트랜잭션, 마이그레이션 (Postgres, SQLite/LibSQL)
     orbic-cache/           # L1(인메모리) + L2(Redis/Valkey) Tiered 캐시, Singleflight, 태그 무효화, 멱등 키, `RateLimit`

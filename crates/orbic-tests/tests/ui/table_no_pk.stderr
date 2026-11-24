@@ -1,0 +1,8 @@
+error: table `notes` has no `#[pk]` field
+         = help: mark the primary key: `#[pk] pub id: Id<Project>`
+ --> tests/ui/table_no_pk.rs:1:1
+  |
+1 | #[orbic::table("notes")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `orbic::table` (in Nightly builds, run with -Z macro-backtrace for more info)

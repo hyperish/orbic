@@ -1,0 +1,13 @@
+error: `#[table]` structs need named fields
+         = help: write `#[table("projects")]` above a `#[model]` struct, with `#[pk]` on its primary-key field
+ --> tests/ui/table_shape.rs:2:17
+  |
+2 | pub struct Point(u32, u32);
+  |                 ^^^^^^^^^^
+
+error: `#[table]` structs cannot be generic
+         = help: store one concrete model per table
+ --> tests/ui/table_shape.rs:5:17
+  |
+5 | pub struct Boxed<T> {
+  |                 ^

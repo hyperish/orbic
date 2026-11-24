@@ -1,0 +1,63 @@
+error[E0080]: evaluation panicked: `sql!`: the query does not return every column of `Project`; select them all (e.g. `RETURNING *`)
+ --> tests/ui-server/sql_columns.rs:5:13
+  |
+5 |     let _ = orbic::sql!(Project, "SELECT id, title FROM projects");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `main::_` failed inside this call
+  |
+note: inside `orbic::__private::orbic_db::assert_all_columns::<Project>`
+ --> $RUST/core/src/panic.rs
+  |
+  = note: the failure occurred here
+  |
+ ::: $WORKSPACE/crates/orbic-db/src/sql.rs
+  |
+  |             panic!("{}", message);
+  |             --------------------- in this macro invocation
+
+error[E0080]: evaluation panicked: `sql!`: the query returns column `note`, which `Project` does not have
+ --> tests/ui-server/sql_columns.rs:7:13
+  |
+7 |     let _ = orbic::sql!(Project, "SELECT id, owner_id, title, is_public, version, note FROM projects");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `main::_` failed inside this call
+  |
+note: inside `orbic::__private::orbic_db::assert_column::<Project>`
+ --> $RUST/core/src/panic.rs
+  |
+  = note: the failure occurred here
+  |
+ ::: $WORKSPACE/crates/orbic-db/src/sql.rs
+  |
+  |     panic!("{}", missing);
+  |     --------------------- in this macro invocation
+
+error[E0080]: evaluation panicked: `sql!`: column `version` is `text` in the query, but the type of `Project.version` is not stored as `text`
+ --> tests/ui-server/sql_columns.rs:9:13
+  |
+9 |     let _ = orbic::sql!(Project, "SELECT id, owner_id, title, is_public, version AS version FROM projects");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `main::_` failed inside this call
+  |
+note: inside `orbic::__private::orbic_db::assert_column::<Project>`
+ --> $RUST/core/src/panic.rs
+  |
+  = note: the failure occurred here
+  |
+ ::: $WORKSPACE/crates/orbic-db/src/sql.rs
+  |
+  |                 panic!("{}", wrong_type);
+  |                 ------------------------ in this macro invocation
+
+error[E0080]: evaluation panicked: `sql!`: column `title` may be NULL, but `Project.title` is not an `Option`
+  --> tests/ui-server/sql_columns.rs:11:13
+   |
+11 |     let _ = orbic::sql!(Project, "SELECT id, owner_id, title, is_public, version FROM projects LEFT JOIN x");
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `main::_` failed inside this call
+   |
+note: inside `orbic::__private::orbic_db::assert_column::<Project>`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: $WORKSPACE/crates/orbic-db/src/sql.rs
+   |
+   |                 panic!("{}", not_optional);
+   |                 -------------------------- in this macro invocation

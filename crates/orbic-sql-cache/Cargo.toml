@@ -1,0 +1,16 @@
+[package]
+name = "orbic-sql-cache"
+description = "The offline metadata cache format of orbic's sql! macro (shared by the macro and hyve-orbic codegen)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hyve-core.workspace = true
+hyve-serde.workspace = true
+
+[lints]
+workspace = true
