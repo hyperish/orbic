@@ -9,9 +9,16 @@
 | # | 결정 항목 | 왜 중요한가 | 지금의 방향(제안) |
 |---|---|---|---|
 | 1 | 엣지 런타임(Cloudflare Workers/DO/D1/R2) 어댑터 지원 여부 | 배포 타깃에 따라 소켓·이벤트 루프 제어 범위와 스토리지 어댑터 우선순위가 달라짐 | Phase 1~3 범위 밖. `orbic-core`의 요청 파이프라인이 전송 중립이라 어댑터로 추가할 수 있게 둠. **결정 시점: Phase 3 완료 후 또는 엣지 배포 요구가 생길 때** (Phase 1을 막지 않음) |
-| 3 | `/health`·`/metrics`·`/docs`의 와이어 형식 | 마운트 접두어와의 관계, 응답 봉투 적용 여부, 인증·CORS 처리, 메트릭 형식, OpenAPI JSON의 URL이 정해져 있지 않음. `hyve-trace`는 Phase 2임 | 앱 루트에 두고 접두어와 봉투를 적용하지 않으며, Phase 1의 메트릭과 로그는 `hyve-trace` 없이 `orbic-adapter-http`가 최소한으로 제공. **결정 시점: `orbic-adapter-http` 착수 전** (작업 순서를 막지 않음) |
 
 ## 결정됨
+
+- **`/health`·`/metrics`·`/docs`의 와이어 형식 확정** (2026-11-24, 열린 결정 3을 제안대로 결정하고 세부를 정함):
+  - 셋 다 `orbic-adapter-http`가 파이프라인 앞에서 답하는 앱 루트 경로입니다. 마운트 접두어·응답 봉투·가드·CORS를 적용하지 않고 보안 헤더와 `X-Request-Id`만 붙입니다. 앱 라우트가 이 경로와 겹치면 HTTP 앱을 만들 때 실패합니다.
+  - `GET /health`: 요청을 받는 중이면 `200 text/plain` `ok`, 셧다운이 시작되면 `503` `shutting down`입니다.
+  - `GET /metrics`: Prometheus 텍스트 형식(0.0.4)으로 상태 코드 대역별 요청 수, 처리 중 요청 수, 처리 시간의 합계와 건수를 냅니다. 내장 경로 요청은 세지 않습니다. 직접 연결한 상대의 주소가 허용 목록(기본은 루프백)에 있고 전달 헤더(`X-Forwarded-For`, `Forwarded`)가 없을 때만 답하며, 그 밖은 `404 route_not_found`입니다. 같은 호스트의 프록시를 거친 외부 요청이 루프백으로 보이는 경우를 막기 위함입니다.
+  - `/health`와 `/metrics`는 HTTPS 요구(`03-adapters-and-pipeline.md` §1 TLS)에서 제외합니다. 프로브와 수집기는 프록시를 거치지 않고 평문으로 직접 접속하고, 두 경로는 자격 증명을 받지 않습니다.
+  - OpenAPI: `.openapi(path)`로 정한 경로의 `GET`이 OpenAPI 3.1 JSON 문서 자체(`application/json`, 봉투 없음)를 돌려줍니다. 인증 없이 열려 있고, 공개 계약만 담습니다. Phase 1은 HTML 뷰어를 제공하지 않으므로 기본 보안 헤더(CSP 포함)를 그대로 적용합니다.
+  - 로그: Phase 1은 `hyve-trace` 없이, 공개 형태로 가려지는 오류(`Internal`, 공개 코드가 아닌 `Infra`)의 원문만 `requestId`와 함께 표준 오류 출력에 한 줄로 남깁니다. 원문은 가리기 전에만 있으므로 이 기록은 `orbic-core`가 합니다(전송 중립이라 인프로세스 호출에도 적용).
 
 - **세션·멱등 키·`RateLimit` 저장소와 `Cache`의 관계 확정** (2026-11-24, 열린 결정 2를 제안대로 결정): `orbic-cache`의 `Cache`는 밀어내는 L1 캐시와 밀어내지 않는 저장소(세션, 멱등 키, `RateLimit` 카운터)를 함께 담되 저장소는 캐시 용량과 무관하게 TTL로만 만료됩니다. 가드(`RateLimit`, `AuthGuard`)와 멱등성 게이트는 자신이 놓인 범위에 `provide`된 `Cache`에서 저장소를 얻고, 없으면 조립이 실패합니다. `POST`로 바인딩한 라우트는 `Idempotency-Key`를 받으므로 그 범위에 `Cache`가 있어야 합니다. 이를 위해 `orbic-core`가 `orbic-cache`에 의존합니다(`orbic-cache`는 파이프라인을 모르는 저장소 계층). 가드는 자신이 필요로 하는 값을 선언하고(`Guard::needs`) 조립이 이를 핸들러의 `Ctx<T>`처럼 검사합니다 (`02-architecture.md` §2, `03-adapters-and-pipeline.md` §1, `05-implementation-plan.md` §2)
 

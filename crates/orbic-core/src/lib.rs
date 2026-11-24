@@ -49,6 +49,6 @@ pub use guard::{Guard, GuardCtx};
 pub use handler::{Handler, encode};
 pub use rate_limit::RateLimit;
 pub use request::{
-    Body, Credential, CredentialSlot, CredentialUpdate, DEFAULT_SESSION_COOKIE, Payload, Principal,
-    Rail, RateLimitInfo, Request, RequestMeta, Response, ResponseMeta,
+    Body, Credential, CredentialSlot, CredentialUpdate, Payload, Principal, Rail, RateLimitInfo,
+    Request, RequestMeta, Response, ResponseMeta,
 };

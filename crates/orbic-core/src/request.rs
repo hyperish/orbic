@@ -242,10 +242,6 @@ impl CredentialSlot {
     }
 }
 
-/// The session cookie name when the app does not set one
-/// ([`OrbicApp::session_cookie`](crate::OrbicApp::session_cookie)).
-pub const DEFAULT_SESSION_COOKIE: &str = "hyperish_session";
-
 /// The pipeline's answer.
 #[derive(Debug)]
 pub struct Response {

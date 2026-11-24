@@ -60,6 +60,10 @@ orbic/
 - **실행 기록 (2026-11-24, 확정의 실행 방식을 바꿈)**: Phase 1의 `orbic-cache`는 `quick_cache`를 포크하지 않고 `=0.7.0`으로 고정해 의존합니다. Singleflight는 `quick_cache`의 자리 표시 가드로, 태그 무효화는 태그 인덱스 대신 **태그 세대**로 구현합니다. 무효화는 태그에 증가하는 순번을 기록하고, 항목은 적재를 시작할 때의 순번을 지니며, 읽을 때 자기 태그 중 더 늦게 무효화된 것이 있으면 버립니다. 그래서 무효화가 O(1)이고, 적재 도중에 무효화된 값도 그 뒤에 제공되지 않으며, 밀어낸 키가 인덱스에 남지 않습니다. 포크는 `hyve`와 같은 기준(측정으로 필요가 확인될 때)으로 미룹니다.
 - **실행 기록 (2026-11-24, 확정의 실행 방식을 바꿈)**: Phase 1의 `orbic-db`는 `sqlx` `=0.9.1`(`runtime-tokio`, `sqlite-bundled`, `sqlite-unlock-notify`, `postgres`; `any`·`macros`·`migrate`는 켜지 않음)을 포크하지 않고 고정해 의존합니다. `hyve-orbic codegen`만 `sqlx-core`·드라이버의 `offline` 피처로 쿼리 분석(`describe`)을 씁니다. 마이그레이션 실행기, 행 디코딩, `Timestamp`의 PostgreSQL 이진 코덱은 `orbic-db`가 직접 구현합니다. `sqlx` 0.9.1의 최소 Rust 버전이 1.94이므로 `hyperish/docs` `05-development-rules.md` §8에 따라 `orbic` 워크스페이스의 `rust-version`을 1.94로 올렸습니다(`hyve`는 1.85 그대로). `orbic`에 의존하는 앱과 공유 크레이트(클라이언트·`wasm32` 빌드 포함)도 1.94 이상이 필요합니다.
 
+- **실행 기록 (2026-11-24, 확정의 실행 방식을 바꿈)**: Phase 1의 `orbic-adapter-http`는 `hyper`를 포크하지 않고 `=1.12.0`(`http1`, `server`; 표에 기록한 버전, 2026-10-06 배포)으로 고정해 의존합니다. 착수 시점의 최신은 `1.13.0`이었으나 하루 전(2026-11-23)에 나온 버전이라 쓰지 않았습니다. `axum`/`tower` 없이 `hyper`의 연결 API에 `HttpApp`을 직접 연결합니다. 포크는 `hyve`와 같은 기준(측정으로 필요가 확인될 때)으로 미룹니다.
+
+외부 의존성(포크하지 않음, 2026-11-24, crates.io 확인): `orbic-adapter-http`의 `hyper-util` (`=0.1.21`, `MIT`, `tokio` 피처의 입출력 어댑터만), `http-body-util` (`=0.1.5`, `MIT`), `http` (`=1.5.0`, `MIT OR Apache-2.0`), `bytes` (`=1.12.2`, `MIT`, 이미 트리에 있던 버전).
+
 외부 의존성(포크하지 않음, 2026-11-24): `orbic-auth`의 `sha2` (`=0.11.1`, `MIT OR Apache-2.0`)와 `getrandom` (`=0.4.3`, `MIT OR Apache-2.0`)은 `sqlx-postgres`가 이미 트리에 두는 같은 버전을 씁니다(`getrandom`은 `hyve`의 고정 버전과도 같음).
 
 외부 의존성(포크하지 않음, 2026-11-24 `cargo info` 확인): 패밀리 네이티브 런타임 `tokio` (`1.54.1`, `MIT` — `hyve/docs/02-architecture.md` §2.5), 라우터 `matchit`(위 표). 이 목록에 없는 의존성은 `hyperish/docs` `05-development-rules.md` §7의 외부 의존성 규칙에 따라 추가 기록합니다.

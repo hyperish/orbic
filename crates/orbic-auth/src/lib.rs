@@ -13,8 +13,8 @@
 //! - Refresh tokens are single use; presenting a used one revokes the whole
 //!   family. Revoking a session revokes its refresh tokens.
 //!
-//! Login and logout routes are the app's; they call [`sign_in`],
-//! [`sign_out`] and [`refresh`].
+//! Login, logout and session routes are the app's; they call [`sign_in`],
+//! [`sign_out`], [`refresh`] and [`current`].
 
 mod token;
 
@@ -120,6 +120,7 @@ struct RefreshRecord {
 pub struct CurrentSession {
     key: String,
     family: String,
+    csrf: Option<String>,
 }
 
 fn unauthenticated() -> HyveError {
@@ -247,6 +248,22 @@ pub async fn sign_in<U: SessionUser>(user: &U, client: Client) -> HyveResult<Sig
         client,
         scope.get::<CredentialSlot>().as_deref(),
     ))
+}
+
+/// The current request's session (behind an [`AuthGuard`]), for a session
+/// lookup route: web clients get their CSRF token again (a reloaded page has
+/// lost it), Bearer clients only the idle lifetime; tokens are never echoed.
+pub async fn current() -> HyveResult<SignedIn> {
+    let (scope, _) = request_scope()?;
+    let session = scope
+        .require::<CurrentSession>()
+        .map_err(|_| unauthenticated())?;
+    Ok(SignedIn {
+        csrf_token: session.csrf.clone(),
+        access_token: None,
+        refresh_token: None,
+        expires_in: config(&scope).idle.as_secs(),
+    })
 }
 
 /// Signs the current request's session out (behind an [`AuthGuard`]): the
@@ -417,7 +434,11 @@ impl<U: SessionUser> Guard for AuthGuard<U> {
             }
             store.touch(&key, config(cx.scope).idle);
             cx.scope.provide(Principal::new(record.principal));
-            cx.scope.provide(CurrentSession { key, family });
+            cx.scope.provide(CurrentSession {
+                key,
+                family,
+                csrf: record.csrf,
+            });
             cx.scope.provide(user);
             Ok(())
         })

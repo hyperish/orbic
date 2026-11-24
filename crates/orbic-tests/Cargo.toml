@@ -18,9 +18,15 @@ hyve = { workspace = true, features = ["test"] }
 orbic.workspace = true
 
 [dev-dependencies]
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+orbic-adapter-http.workspace = true
 orbic-cache.workspace = true
 orbic-core.workspace = true
-tokio = { workspace = true, features = ["macros", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 trybuild.workspace = true
 
 [lints]

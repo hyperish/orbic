@@ -77,7 +77,8 @@ pub(crate) fn begin(
             Err(HyveError::domain(
                 "request_in_progress",
                 "a request with this `Idempotency-Key` is still being processed",
-            ))
+            )
+            .retryable(true))
         }
         Begin::Mismatch => Err(HyveError::domain(
             "idempotency_key_mismatch",

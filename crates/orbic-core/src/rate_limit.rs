@@ -97,7 +97,8 @@ impl Guard for RateLimit {
                 Err(HyveError::domain(
                     "rate_limited",
                     format!("too many requests; retry in {reset_secs} s"),
-                ))
+                )
+                .retryable(true))
             }
         })
     }

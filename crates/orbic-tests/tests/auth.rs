@@ -58,6 +58,10 @@ async fn refresh(input: Valid<RefreshInput>) -> HyveResult<SignedIn> {
     auth::refresh::<CurrentUser>(&input.into_inner().refresh_token).await
 }
 
+async fn session() -> HyveResult<SignedIn> {
+    auth::current().await
+}
+
 async fn logout() -> HyveResult<()> {
     auth::sign_out().await
 }
@@ -86,6 +90,7 @@ fn app(cache: Cache) -> Pipeline {
                 .get("/me", me)
                 .post("/me", me)
                 .post("/logout", logout)
+                .get("/session", session)
                 .mount(
                     "/admin",
                     component()
@@ -158,6 +163,13 @@ async fn web_sessions_use_a_cookie_and_csrf() {
         ),
         "ada"
     );
+    // A reloaded page recovers its CSRF token; the session token is not echoed.
+    let looked_up: SignedIn = json(
+        &app.dispatch(with(Method::Get, "/v1/session", session(None)))
+            .await,
+    );
+    assert_eq!(looked_up.csrf_token.as_deref(), Some(csrf.as_str()));
+    assert!(looked_up.access_token.is_none() && looked_up.refresh_token.is_none());
     assert_eq!(
         code(
             &app.dispatch(with(Method::Post, "/v1/me", session(None)))

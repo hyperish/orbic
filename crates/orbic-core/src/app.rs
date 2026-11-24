@@ -25,7 +25,6 @@ use crate::request::{CredentialSlot, Rail, Request, Response, ResponseMeta};
 #[derive(Default)]
 pub struct OrbicApp {
     root: BackendComponent,
-    session_cookie: Option<String>,
 }
 
 impl OrbicApp {
@@ -37,13 +36,6 @@ impl OrbicApp {
     /// Provides `value` to every route ([`BackendComponent::provide`]).
     pub fn provide<T: Send + Sync + 'static>(mut self, value: T) -> Self {
         self.root = self.root.provide(value);
-        self
-    }
-
-    /// The name of the session cookie adapters read and set (default
-    /// [`DEFAULT_SESSION_COOKIE`](crate::DEFAULT_SESSION_COOKIE)).
-    pub fn session_cookie(mut self, name: &str) -> Self {
-        self.session_cookie = Some(name.to_owned());
         self
     }
 
@@ -125,9 +117,6 @@ impl OrbicApp {
                 root,
                 top,
                 state: Shutdown::default(),
-                session_cookie: self
-                    .session_cookie
-                    .unwrap_or_else(|| crate::request::DEFAULT_SESSION_COOKIE.to_owned()),
             }),
         })
     }
@@ -303,7 +292,6 @@ struct Inner {
     /// The root component's scope (values `OrbicApp::provide` gave).
     top: Scope,
     state: Shutdown,
-    session_cookie: String,
 }
 
 /// A registered route, for documentation generators.
@@ -343,9 +331,10 @@ impl Pipeline {
         self.inner.state.wake();
     }
 
-    /// The session cookie name ([`OrbicApp::session_cookie`]).
-    pub fn session_cookie(&self) -> &str {
-        &self.inner.session_cookie
+    /// Whether the pipeline still accepts requests (`false` after
+    /// [`begin_shutdown`](Self::begin_shutdown)).
+    pub fn is_accepting(&self) -> bool {
+        self.inner.state.accepting.load(Ordering::SeqCst)
     }
 
     /// A value provided at the app's root (`OrbicApp::provide`), for test
@@ -467,7 +456,21 @@ impl Inner {
         };
         Response {
             rail,
-            outcome: outcome.map_err(|e| e.to_public().with_request_id(request_id.clone())),
+            outcome: outcome.map_err(|e| {
+                let public = e.to_public();
+                // The original is about to be hidden; it survives only here
+                // (Phase 1 log, `docs/04-open-questions.md` decision 3).
+                if public.code() != e.code() || public.message() != e.message() {
+                    eprintln!(
+                        "orbic [{}] {:?} {}: {}",
+                        request_id.as_str(),
+                        e.kind(),
+                        e.code(),
+                        e.message()
+                    );
+                }
+                public.with_request_id(request_id.clone())
+            }),
             request_id,
             meta,
         }

@@ -26,6 +26,16 @@
    - 위 규칙으로 정한 공개 형태(종류, `code`, `message`, `details`, 재시도 가능 여부, `requestId`)는 레일을 고르기 전에 한 번만 만듭니다. 표준 레일은 그것을 봉투와 상태 코드로, 고속 레일은 같은 상태 코드에 그것을 아카이브해 싣습니다(`hyve/docs/03-adapters-and-pipeline.md` §3.3). `Infra`의 `code` 치환과 `Internal`의 가림은 두 레일에 똑같이 적용되고, 내부 오류 값 자체는 어느 레일로도 나가지 않습니다.
 
 - **`TestClient`의 위치**: `TestClient`는 소켓만 빼고 `orbic-adapter-http`의 변환 계층(상태 코드, 헤더, 봉투, CORS, 보안 헤더, 요청 크기 제한)을 그대로 통과합니다. 그래서 같은 시나리오가 `TestClient`와 실제 서버에서 같은 응답을 냅니다. `TestClient`는 `hyve-api`의 전송 트레이트도 구현하며, 레일을 지정하면 `#[server]` 스텁의 호출을 그 레일의 직렬화와 변환 계층까지 통과시킵니다. 레일을 지정하지 않은 인프로세스 전송은 직렬화 없이 파이프라인만 거칩니다(`hyve/docs/03-adapters-and-pipeline.md` §3.2).
+- **HTTP 변환 세부 (제안, 2026-11-24)**: `orbic-adapter-http`의 `HttpApp::handle`이 소켓 없는 변환 전체이고 `HttpApp::serve`는 소켓만 더합니다. `TestClient`는 `handle`을 부릅니다.
+  - 설정: 앱 루트에 `provide`한 `HttpConfig`(없으면 기본값)를 서버와 `TestClient`가 함께 읽습니다. 본문 상한 1 MiB, CORS 허용 Origin(정확한 Origin만, `*`는 조립 실패), 신뢰하는 프록시 주소 범위, `/metrics` 허용 범위(기본 루프백), 세션 쿠키 이름(기본 `hyperish_session`), 셧다운 유예 30초.
+  - 상관관계 ID: 요청 헤더 `X-Request-Id`가 1~128자의 출력 가능한 ASCII면 그 값을, 아니면 새 값을 씁니다(거부하지 않음). 모든 응답이 같은 헤더로 그 ID를 싣습니다(`hyperish/docs` `03-api-protocol.md` §4).
+  - 레일: `Content-Type`이 `application/vnd.hyperish.rkyv`면 고속 레일이고 `Hyperish-Fn`과 16진수 `Hyperish-Schema`가 없으면 `415 unsupported_media_type`입니다. 본문이 있는 표준 레일 요청은 `application/json`(매개변수 허용)이어야 합니다. 고속 레일의 오류는 아카이브한 오류 값이지만 `415`는 폴백 신호라 JSON 봉투입니다. 어댑터가 파이프라인 전에 내는 오류(`413`, `415`, API 메서드가 아닌 메서드의 `405`, HTTPS 거부, 허용하지 않은 Origin의 사전 요청)는 JSON 봉투입니다.
+  - 재시도: 오류가 재시도 가능할 때만, 그리고 그때는 반드시 `Retry-After`를 붙입니다. 값은 파이프라인이 정한 초(속도 제한의 초기화까지, 처리 중 응답의 1초) 또는 기본 1초입니다. `rate_limited`와 `request_in_progress`는 재시도 가능한 오류입니다. `405`는 `Allow`를 붙입니다.
+  - 자격 증명: `Authorization: Bearer`가 쿠키보다 우선합니다(헤더는 의도해서 보내고 쿠키는 저절로 실림). 세션 쿠키는 `Path=/; HttpOnly; Secure; SameSite=Lax`이고 `Max-Age`가 없는 세션 쿠키입니다(만료는 서버의 유휴·무조건 만료가 정함). 로그아웃은 `Max-Age=0`으로 지웁니다.
+  - 보안 헤더(모든 응답): `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `Strict-Transport-Security: max-age=31536000`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
+  - CORS: 허용한 Origin의 요청에 `Access-Control-Allow-Origin`(그 Origin), `Access-Control-Allow-Credentials: true`, `Access-Control-Expose-Headers`(`Retry-After`, `RateLimit-*`, `X-Request-Id` — 다른 Origin의 스텁이 재시도 가능 여부를 복원하려면 필요)를 붙이고, 모든 응답에 `Vary: Origin`을 붙입니다. 사전 요청(`OPTIONS` + `Origin` + `Access-Control-Request-Method`)은 파이프라인 전에 답하며, 허용한 Origin이면 `204`와 허용 메서드·헤더·`Access-Control-Max-Age: 600`, 아니면 `403 forbidden`입니다.
+  - 프록시: 신뢰하는 프록시가 직접 보낸 요청만 `X-Forwarded-For`·`X-Forwarded-Proto`를 믿습니다. 클라이언트 주소는 `X-Forwarded-For`에서 오른쪽부터 신뢰하는 프록시가 아닌 첫 항목이고(왼쪽 항목은 클라이언트가 쓴 값), 형식이 깨진 사슬은 믿지 않습니다. 스킴은 `X-Forwarded-Proto`의 마지막 값(가장 가까운 프록시가 본 값)입니다.
+  - 취소: 요청은 자기 연결의 작업 안에서 실행되어, 클라이언트가 연결을 끊으면 핸들러가 취소됩니다. 셧다운은 수신을 멈추고 파이프라인의 셧다운을 시작한 뒤(새 요청은 재시도 가능한 `503`, `/health`는 `503`) 연결을 우아하게 닫고, 유예가 지나면 실행 중인 요청을 취소하고 1초 뒤 연결을 끊습니다.
 - **TLS (제안)**: Phase 1의 `orbic-adapter-http`는 HTTP/1.1을 서빙하고 TLS 종단은 앞단 프록시에 맡깁니다. 운영 설정에서는 신뢰하도록 지정한 프록시가 전달한 스킴이 HTTPS가 아닌 요청을 거부하고, 루프백에 바인딩한 개발·테스트 서버만 평문을 허용합니다. 자체 TLS와 HTTP/2는 Phase 2에서 정합니다.
 
 ## 2. 호환 어댑터 구성
