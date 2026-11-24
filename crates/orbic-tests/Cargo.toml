@@ -1,0 +1,23 @@
+[package]
+name = "orbic-tests"
+description = "Pipeline and contract tests for orbic (fixture crate, not published)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[features]
+## Plays an app's `server` feature: keeps `#[server]` handler bodies.
+server = []
+
+[dependencies]
+hyve = { workspace = true, features = ["test"] }
+
+[dev-dependencies]
+orbic-core.workspace = true
+
+[lints]
+workspace = true

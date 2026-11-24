@@ -8,20 +8,68 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Must match `rust-version` in Cargo.toml (hyperish/docs 05-development-rules.md §8).
+  MSRV: "1.85"
+  # hyve is not published yet: the workspace depends on `../hyve` with an exact
+  # version (hyperish/docs 05-development-rules.md §5), so CI checks it out next
+  # to orbic. Switch to the registry once `hyve 0.1.0-alpha.N` is published.
+  HYVE_REF: feat/phase1
 
 jobs:
   check:
-    name: Format, Clippy & Test
+    name: Format, Clippy & Test (stable)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orbic
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: orbic
+      - uses: actions/checkout@v4
+        with:
+          repository: hyperish/hyve
+          ref: ${{ env.HYVE_REF }}
+          path: hyve
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: orbic
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
+      # The fixture crate plays an app's shared crate; `#[server]` handler
+      # bodies exist only with its `server` feature, so test both builds.
+      - name: Lint and test with the server feature
+        run: |
+          cargo clippy -p orbic-tests --all-targets --features server --locked -- -D warnings
+          cargo test -p orbic-tests --features server --locked
+
+  msrv:
+    name: Build on the declared minimum Rust version
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orbic
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: orbic
+      - uses: actions/checkout@v4
+        with:
+          repository: hyperish/hyve
+          ref: ${{ env.HYVE_REF }}
+          path: hyve
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.MSRV }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: orbic
+      - name: Check
+        run: cargo check --workspace --all-targets --locked
