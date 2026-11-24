@@ -1,10 +1,12 @@
 # 03. 파이프라인과 호환 어댑터 (orbic)
 
-> 상태: 코어 `ref` + 호환 어댑터 분리 원칙은 **확정**, 도메인별 어댑터 세부는 **제안** · 기준일: 2026-11-19
+> 상태: 코어 `ref` + 호환 어댑터 분리 원칙은 **확정**, 도메인별 어댑터 세부는 **제안** · 기준일: 2026-11-24
 
 `orbic`의 모든 백엔드 도메인(DB, Cache, MSA, WS/WT)은 **내부 고성능 코어 파이프라인**과 **외부·인프라 호환 어댑터**의 2단 구조로 동작합니다(`hyperish/docs` `02-core-contracts.md` §2~§7).
 
 ## 1. 백엔드 요청·작업 파이프라인
+
+이 파이프라인은 `orbic-core`가 소유하며, 외부 어댑터·내부 MSA 채널·인메모리 `TestClient`가 모두 같은 진입점을 호출합니다. 어댑터와 `TestClient`는 아래 단계를 복제하지 않습니다(`hyperish/docs` `02-core-contracts.md` §5).
 
 1. **어댑터 수신 및 컨텍스트 생성**: 외부 어댑터(`orbic-adapter-http`, `orbic-adapter-ws` 등) 또는 내부 MSA 채널이 요청을 받아 상관관계 ID(`requestId`)와 구조적 취소 토큰(`CancellationToken`)을 포함한 요청 컨텍스트(핸들러에는 `Ctx<T>`로 주입)를 생성합니다.
 2. **접근 권한·멱등성 게이트**:
@@ -18,9 +20,9 @@
 
 | 영역 | 코어 추상화 (`orbic-*`) | 호환 어댑터 및 동작 방식 |
 |---|---|---|
-| **Dual-Rail API 전송** | `hyve-api` + `orbic-core` | • **표준 레일**: 외부 호환용 **HTTP/JSON** (`hyperish/docs` `03-api-protocol.md` 준수: 커서 페이지네이션, `expectedVersion` 낙관적 잠금, `RateLimit-*` 헤더)<br>• **고속 레일**: `serge` ↔ `orbic` 인라인 서버 함수 및 MSA 호출 시 **`hyve-serde` 제로카피 바이너리** 직결 및 클라이언트 언마운트 시 종단 간 취소(`CancellationToken`) 전파 |
-| **Dual-Rail 실시간 (WT / WS)** | `orbic-realtime` (`seq`, 룸 상태, 중복 제거) | **WebTransport(HTTP/3 QUIC 다중 스트림·데이터그램)**를 1순위로 연결하고, QUIC/UDP가 차단된 네트워크에서는 **WebSocket**(`04-realtime-communication.md`)으로 자동 폴백. 브라우저 WebTransport도 커스텀 인증 헤더를 보낼 수 없으므로 동일한 `?ticket=` 일회용 티켓 핸드셰이크를 쓰며, 폴백 전환 시에도 `seq`·중복 제거 `id` 연속성을 유지 |
-| **인증·세션 (`orbic-auth`)** | `orbic-auth` + `orbic-cache` | 웹(`HttpOnly` 쿠키 + `X-CSRF-Token`)과 네이티브/CLI(`Bearer` 토큰) 이중 전송 어댑터. 즉시 철회 보장을 위해 **L2(Redis/Valkey) Opaque 세션 직접 조회를 기본**으로 하며, L1 캐싱 옵트인 시 초단기 TTL·단절 시 L1 전체 플러시·노출 창 명시(`02-core-contracts.md` §6) |
+| **Dual-Rail API 전송** | `hyve-api` + `orbic-core` | • **표준 레일**: 외부 호환용 **HTTP/JSON** (`hyperish/docs` `03-api-protocol.md` 준수: 커서 페이지네이션, `expectedVersion` 낙관적 잠금, `RateLimit-*` 헤더)<br>• **고속 레일**: `serge` ↔ `orbic` 인라인 서버 함수 및 MSA 호출 시 **`hyve-serde` 제로카피 바이너리** 직결(요청-응답은 `orbic-adapter-http`의 바이너리 본문, 스키마가 어긋나면 표준 레일로 폴백) 및 클라이언트 언마운트 시 종단 간 취소(`CancellationToken`) 전파 |
+| **Dual-Rail 실시간 (WT / WS)** | `orbic-realtime` (`seq`, 룸 상태, 중복 제거) | **WebTransport(HTTP/3 QUIC 다중 스트림·데이터그램)**를 1순위로 연결하고, QUIC/UDP가 차단된 네트워크에서는 **WebSocket**(`04-realtime-communication.md`)으로 자동 폴백. 고속 레일은 폴백 WS에서도 `hyve-serde` 바이너리 프레임을 유지하고, JSON 텍스트 프레임은 외부 클라이언트용 표준 레일에만 씀. 브라우저 WebTransport도 커스텀 인증 헤더를 보낼 수 없으므로 동일한 `?ticket=` 일회용 티켓 핸드셰이크를 쓰며, 폴백 전환 시에도 `seq`·중복 제거 `id` 연속성을 유지 |
+| **인증·세션 (`orbic-auth`)** | `orbic-auth` + `orbic-cache` | 웹(`HttpOnly` 쿠키 + `X-CSRF-Token`)과 네이티브/CLI(`Bearer` 토큰) 이중 전송 어댑터. 즉시 철회 보장을 위해 **Opaque 세션의 권위 저장소 직접 조회를 기본**(단일 노드는 인프로세스 저장소, 멀티 레플리카는 L2 Redis/Valkey)으로 하며, 멀티 레플리카에서 L1 캐싱 옵트인 시 초단기 TTL·단절 시 L1 전체 플러시·노출 창 명시(`02-core-contracts.md` §6) |
 | **DB & Cache** | `orbic-db`, `orbic-cache` | **PostgreSQL** 및 **SQLite/LibSQL** 드라이버 어댑터(`#[table]` 체이닝 + `sql!` 매크로), **L1 인메모리(`quick_cache` S3-FIFO) + L2 `Redis/Valkey`(`fred` RESP3)** Tiered 캐시 어댑터(Singleflight·태그 무효화) |
 | **Storage · Jobs · Notify** | `orbic-storage`, `orbic-jobs`, `orbic-notify` | 로컬/S3/R2 멀티파트 업로드(크기·체크섬 검증 후 활성화), 지연·재시도·DLQ 작업 큐 및 Cron 스케줄러, 이메일·푸시(APNs/FCM)·HMAC 웹훅 어댑터 |
 | **`serge` 웹 서빙** | `orbic-adapter-serge` | `serge`가 산출한 정적 에셋 매니페스트(`SergeBundleManifest`), 라우트 메타데이터, `serge-web-ssr` 스트리밍 핸들러(`SergeSsrHandler`)를 받아 프로덕션 서빙 (`serge/docs/03-adapters-and-pipeline.md` §3 참조) |
