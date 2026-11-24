@@ -1,8 +1,13 @@
 //! `hyve-orbic` — the orbic stages `hyve` runs (`docs/01-dx-and-dsl.md` §4).
 //!
 //! ```text
+//! hyve-orbic stages
 //! hyve-orbic codegen [--check] [--prune] [--root <dir>]
 //! ```
+//!
+//! `stages` answers `hyve`'s question (`hyve/docs/01-dx-and-dsl.md` §2,
+//! 프레임워크 단계 호출): the first line is orbic's version, then one stage
+//! name per line.
 //!
 //! `codegen` finds every `sql!` in the workspace's Rust sources, analyzes
 //! each query on databases with the migrations applied, and writes
@@ -15,7 +20,11 @@ mod codegen;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: hyve-orbic codegen [--check] [--prune] [--root <dir>]";
+const USAGE: &str =
+    "usage: hyve-orbic stages | hyve-orbic codegen [--check] [--prune] [--root <dir>]";
+
+/// The stages this executable provides.
+const STAGES: [&str; 1] = ["codegen"];
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -23,6 +32,13 @@ fn main() -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
+    if stage == "stages" && rest.is_empty() {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        for s in STAGES {
+            println!("{s}");
+        }
+        return ExitCode::SUCCESS;
+    }
     if stage != "codegen" {
         eprintln!("error: unknown stage `{stage}`\n{USAGE}");
         return ExitCode::from(2);

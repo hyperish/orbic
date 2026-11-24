@@ -903,7 +903,10 @@ async fn a_client_that_disconnects_cancels_its_request() {
 #[hyve::test]
 async fn behind_a_proxy_https_is_required_and_the_client_address_is_forwarded() {
     let cfg = config().trusted_proxy("10.0.0.0/8");
-    let app = HttpApp::new(pipeline(cfg)).unwrap();
+    let app = HttpApp::new(pipeline(cfg))
+        .unwrap()
+        .document("/docs", "application/json", "{}")
+        .unwrap();
     let proxy: SocketAddr = "10.0.0.2:5000".parse().unwrap();
     let outsider: SocketAddr = "203.0.113.9:5000".parse().unwrap();
 
@@ -933,6 +936,18 @@ async fn behind_a_proxy_https_is_required_and_the_client_address_is_forwarded() 
         "the nearest proxy saw http"
     );
     assert_eq!(app.handle(get("/health"), outsider).await.status(), 200);
+    // Documents are not probes: HTTPS like the API (decision 3).
+    let r = app.handle(get("/docs"), outsider).await;
+    assert_eq!(
+        (r.status(), envelope(&r).0.as_str()),
+        (StatusCode::BAD_REQUEST, "invalid_request")
+    );
+    let via_https = req("GET", "/docs")
+        .header("x-forwarded-proto", "https")
+        .body(Bytes::new())
+        .unwrap();
+    let r = app.handle(via_https, proxy).await;
+    assert_eq!((r.status(), body(&r)), (StatusCode::OK, "{}"));
 
     // Two clients behind the proxy are limited separately; a spoofed
     // leftmost entry does not help.

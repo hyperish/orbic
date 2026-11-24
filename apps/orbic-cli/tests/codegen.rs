@@ -129,3 +129,21 @@ fn the_fixture_cache_is_up_to_date() {
     let o = hyve_orbic(&["codegen", "--check"], &root);
     assert!(o.status.success(), "{}", text(&o));
 }
+
+#[test]
+fn stages_answer_hyve() {
+    let o = Command::new(env!("CARGO_BIN_EXE_hyve-orbic"))
+        .arg("stages")
+        .output()
+        .unwrap();
+    assert!(o.status.success());
+    assert_eq!(
+        String::from_utf8(o.stdout).unwrap(),
+        format!("{}\ncodegen\n", env!("CARGO_PKG_VERSION"))
+    );
+    let o = Command::new(env!("CARGO_BIN_EXE_hyve-orbic"))
+        .args(["stages", "extra"])
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(2));
+}

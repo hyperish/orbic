@@ -305,12 +305,29 @@ impl HttpApp {
                     ))
                 }
             }
+            // Documents are not exempt from HTTPS (decision 3: only the
+            // probes are).
             _ => self
                 .documents
                 .iter()
                 .find(|d| d.0 == path)
-                .map(|(_, ct, body)| text(StatusCode::OK, ct, body.clone())),
+                .map(|(_, ct, body)| {
+                    if self.secure(headers, peer.ip().to_canonical()) {
+                        text(StatusCode::OK, ct, body.clone())
+                    } else {
+                        error(https_required(), id)
+                    }
+                }),
         }
+    }
+
+    /// Whether the request may reach the API: plain HTTP is allowed, or a
+    /// trusted proxy forwarded it as HTTPS.
+    fn secure(&self, headers: &HeaderMap, peer: IpAddr) -> bool {
+        self.plaintext
+            || (self.settings.trusted.iter().any(|c| c.contains(peer))
+                && last_value(headers, &X_FORWARDED_PROTO)
+                    .is_some_and(|p| p.eq_ignore_ascii_case("https")))
     }
 
     async fn api(
@@ -323,16 +340,8 @@ impl HttpApp {
         let headers = &parts.headers;
         let peer = peer.ip().to_canonical();
         let via_proxy = self.settings.trusted.iter().any(|c| c.contains(peer));
-        let https = via_proxy
-            && last_value(headers, &X_FORWARDED_PROTO)
-                .is_some_and(|p| p.eq_ignore_ascii_case("https"));
-        if !self.plaintext && !https {
-            return error(
-                HyveError::invalid_request(
-                    "HTTPS is required: terminate TLS at a trusted proxy that sets X-Forwarded-Proto",
-                ),
-                id,
-            );
+        if !self.secure(headers, peer) {
+            return error(https_required(), id);
         }
         if parts.method == HttpMethod::OPTIONS
             && headers.contains_key(header::ORIGIN)
@@ -504,7 +513,13 @@ fn framework(code: &'static str, message: String) -> HyveError {
     HyveError::domain(code, message)
 }
 
-fn too_large(max: usize) -> HyveError {
+fn https_required() -> HyveError {
+    HyveError::invalid_request(
+        "HTTPS is required: terminate TLS at a trusted proxy that sets X-Forwarded-Proto",
+    )
+}
+
+pub(crate) fn too_large(max: usize) -> HyveError {
     framework(
         "payload_too_large",
         format!("the request body is larger than {max} bytes"),
