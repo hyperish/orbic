@@ -1,6 +1,6 @@
 # 01. DX 및 컴포넌트 설계 (orbic)
 
-> 상태: Rust 스타일 컴포넌트 조립 아키텍처·`loco.rs` 도메인 생산성·영역별 표현 방식 고정(조립은 순수 Rust 체이닝)은 **확정**, 세부 API 시그니처는 **제안** · 기준일: 2026-11-19
+> 상태: Rust 스타일 컴포넌트 조립 아키텍처·`loco.rs` 도메인 생산성·영역별 표현 방식 고정(조립은 순수 Rust 체이닝)은 **확정**, 세부 API 시그니처는 **제안** · 기준일: 2026-11-24
 
 `orbic`의 DX 목표는 **`loco.rs`처럼 백엔드에 필요한 모든 부품(ORM/Query, Cache, Auth, Middleware, 워커, 실시간 룸, Swagger, TestClient)이 처음부터 준비되어 있으면서**, 고정된 폴더 구조를 강요하지 않고 **깔끔한 Rust 스타일 컴포넌트(`BackendComponent`)로 개발자가 원하는 아키텍처를 직접 조립**하게 하는 것입니다.
 
@@ -123,7 +123,9 @@ async fn create_project_rejects_empty_title() {
 `serge` 프론트엔드에서 백엔드 핸들러를 일반 Rust 비동기 함수처럼 호출할 때도 **숨겨진 전역 자동 등록을 금지**합니다.
 
 - **서버 빌드(`feature = "server"`)**: `#[server(POST "/projects")]`는 원본 핸들러와 라우트 디스크립터를 남겨 `orbic::component().wrap(AuthGuard::require_user()).handle(create_project)`로 **명시 등록**합니다(권한 가드·레이트리밋·`/v1` 마운트·OpenAPI·`TestClient` 100% 일관 적용).
-- **클라이언트 빌드(`!feature = "server"`)**: `#[server_ctx]` 추출자(`Ctx<Db>`, `Ctx<CurrentUser>`)와 함수 본문을 컴파일 타임에 완전히 제거하고 `serge-adapter-client`(Dual-Rail + 뷰 언마운트 시 `CancellationToken` 전파) 호출 스텁만 남깁니다.
+- **클라이언트 빌드(`not(feature = "server")`)**: `#[server_ctx]` 추출자(`Ctx<Db>`, `Ctx<CurrentUser>`)와 함수 본문을 컴파일 타임에 완전히 제거하고 `serge-adapter-client`(Dual-Rail + 뷰 언마운트 시 `CancellationToken` 전파) 호출 스텁만 남깁니다.
+- **기준은 타깃이 아니라 피처**: 제거 여부는 함수가 선언된 공유 크레이트의 `server` 피처로만 갈립니다. 서버 바이너리만 이 피처를 켜고, 웹(WASM)과 네이티브 클라이언트는 모두 끈 상태로 빌드해 서버 본문과 DB 의존성을 링크하지 않습니다.
+- **소유와 해석**: `#[server]`/`#[server_ctx]` 매크로는 `hyve-macros`가 소유합니다. `POST "/projects"` 인자는 `hyve`가 해석하지 않는 바인딩 메타데이터이고, 이를 HTTP 라우트와 OpenAPI로 해석하는 것은 `orbic`입니다(`hyve/docs/02-architecture.md` §2.4).
 
 ```rust
 // shared/projects.rs — 단일 모델 + 인라인 서버 함수
