@@ -95,7 +95,11 @@ fn assembly_reports_every_problem() {
         .err()
         .expect("assembly must fail");
     let text = e.to_string();
-    assert_eq!(e.problems().len(), 4, "{text}");
+    assert_eq!(e.problems().len(), 5, "{text}");
+    assert!(
+        text.contains("POST /v1/x: `POST` routes accept `Idempotency-Key`, which needs a `Cache`"),
+        "{text}"
+    );
     assert!(text.contains("GET /v1/x is registered twice"), "{text}");
     assert!(text.contains("takes `Ctx<pipeline::Label>`"), "{text}");
     assert!(text.contains("mount prefix \"v2\""), "{text}");
@@ -229,6 +233,7 @@ async fn scope_is_current() -> HyveResult<bool> {
 #[hyve::test]
 async fn extractors_read_body_query_and_path() {
     let app = OrbicApp::new()
+        .provide(orbic_cache::Cache::in_memory())
         .route(Method::Post, "/notes", create)
         .route(Method::Get, "/notes", find)
         .route(Method::Get, "/notes/{id}", by_id)
@@ -349,6 +354,24 @@ async fn shutdown_stops_new_requests_and_waits_for_running_ones() {
     assert_eq!(app.in_flight(), 0);
 }
 
+/// Provides the bearer token as the principal (a stand-in for `AuthGuard`).
+pub struct BearerPrincipal;
+
+impl Guard for BearerPrincipal {
+    fn provides(&self) -> Vec<ContextNeed> {
+        vec![ContextNeed::of::<orbic_core::Principal>()]
+    }
+
+    fn check<'a>(&'a self, cx: &'a mut GuardCtx<'_>) -> BoxFuture<'a, HyveResult<()>> {
+        Box::pin(async move {
+            if let Some(orbic_core::Credential::Bearer(t)) = &cx.meta.credential {
+                cx.scope.provide(orbic_core::Principal::new(t.clone()));
+            }
+            Ok(())
+        })
+    }
+}
+
 /// Polls once with a no-op waker.
 fn futures_poll_once<F: std::future::Future>(f: std::pin::Pin<&mut F>) -> Option<F::Output> {
     let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
@@ -407,6 +430,8 @@ mod server_functions {
 
     fn app() -> Pipeline {
         OrbicApp::new()
+            .provide(orbic_cache::Cache::in_memory())
+            .wrap(BearerPrincipal)
             .provide(Store {
                 prefix: "> ".into(),
             })
@@ -572,6 +597,58 @@ mod server_functions {
         )
         .await;
         assert_eq!(err(&r).code(), "note_not_found");
+    }
+
+    /// Same key on the other rail: the media type is part of "the same body".
+    #[hyve::test]
+    async fn an_idempotency_key_is_bound_to_its_rail() {
+        let app = app();
+        let add = d(add_note);
+        let note = Note {
+            text: "hi".into(),
+            pinned: true,
+        };
+        let keyed = |mut r: Request| {
+            r.meta.idempotency_key = Some("k1".into());
+            r.meta.credential = Some(orbic_core::Credential::Bearer("ada".into()));
+            r
+        };
+        let r = send(
+            &app,
+            keyed(fast(
+                "/v1/notes",
+                add.id,
+                add.fingerprint,
+                note.to_binary().unwrap().to_vec(),
+            )),
+        )
+        .await;
+        assert!(
+            matches!(r.outcome, Ok(Payload::Binary(_))),
+            "{:?}",
+            r.outcome
+        );
+        let r = send(
+            &app,
+            keyed(fast(
+                "/v1/notes",
+                add.id,
+                add.fingerprint,
+                note.to_binary().unwrap().to_vec(),
+            )),
+        )
+        .await;
+        assert!(
+            matches!(r.outcome, Ok(Payload::Binary(_))),
+            "replayed: {:?}",
+            r.outcome
+        );
+        let r = send(
+            &app,
+            keyed(Request::new(Method::Post, "/v1/notes").json(to_json(&note))),
+        )
+        .await;
+        assert_eq!(err(&r).code(), "idempotency_key_mismatch");
     }
 
     #[hyve::test]

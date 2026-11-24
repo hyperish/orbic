@@ -27,6 +27,17 @@ pub struct GuardCtx<'r> {
 /// order they were wrapped, outermost component first, each exactly once per
 /// request; the first error ends the request.
 pub trait Guard: Send + Sync + 'static {
+    /// The guard's name, for assembly messages.
+    fn name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
+    /// Values the guard takes from the scope it is wrapped in (checked when
+    /// the app is assembled, like a handler's `Ctx<T>`).
+    fn needs(&self) -> Vec<ContextNeed> {
+        Vec::new()
+    }
+
     /// Values this guard provides to the request scope, so handlers below it
     /// may take them as `Ctx<T>` (checked when the app is assembled).
     fn provides(&self) -> Vec<ContextNeed> {

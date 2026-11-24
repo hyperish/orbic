@@ -42,6 +42,7 @@ orbic/
               [ hyve (core / state / serde / api) ]
 ```
 
+- **`orbic-core` → `orbic-cache` (2026-11-24)**: 저장소 계층인 `orbic-cache`는 파이프라인을 모르고, `orbic-core`의 멱등성 게이트와 `RateLimit` 가드가 앱이 `provide`한 `Cache`에서 저장소를 얻습니다(`04-open-questions.md` 결정됨).
 - **코어 무오염 원칙**: `orbic-core`와 비즈니스 서비스 코드는 외부 전송 규약(HTTP 헤더, JSON 문자열, 특정 클라우드 바인딩 타입)을 직접 다루지 않고 `hyve`의 모델·오류·취소 계약을 기준으로 동작합니다.
 
 ## 3. 확정 MIT 포크 스택 및 내부 코어 `unit optimization` 타깃 (2026-11-19 확정)
@@ -55,5 +56,7 @@ orbic/
 | `orbic-cache` | L1 `quick_cache` (`0.7.0`, `MIT`), L2 `fred` (`10.1.0`, `MIT`) | `quick_cache`(S3-FIFO)에 Singleflight·태그 인덱스 직결; `fred`는 범용 클러스터/타입 변환 계층을 덜어내고 RESP3 파이프라이닝·`rkyv` 무복사 바이트 버퍼·Client-Side Invalidation만 남김 |
 | `orbic-adapter-ws` | `quinn` (`0.11.12`, `MIT OR Apache-2.0`) + `wtransport` (`0.7.2`, `MIT OR Apache-2.0`), `tokio-tungstenite` (`0.30.0`, `MIT`) | 고속 레일은 WebTransport(QUIC) 1순위이고 WS 폴백에서도 `hyve-serde`(`rkyv`) 바이너리 프레임을 유지, 표준 레일 WS는 04 규약의 JSON 텍스트 프레임 |
 | `orbic-openapi` | `utoipa` (`6.0.0`, `MIT OR Apache-2.0`) | OpenAPI 3.1 스키마 모델만 경량 채택해 `hyve-validate` 리플렉션과 직결 |
+
+- **실행 기록 (2026-11-24, 확정의 실행 방식을 바꿈)**: Phase 1의 `orbic-cache`는 `quick_cache`를 포크하지 않고 `=0.7.0`으로 고정해 의존합니다(최소 Rust 버전 1.85로 패밀리와 같음). Singleflight는 `quick_cache`의 자리 표시 가드로, 태그 무효화는 태그 인덱스 대신 **태그 세대**로 구현합니다. 무효화는 태그에 증가하는 순번을 기록하고, 항목은 적재를 시작할 때의 순번을 지니며, 읽을 때 자기 태그 중 더 늦게 무효화된 것이 있으면 버립니다. 그래서 무효화가 O(1)이고, 적재 도중에 무효화된 값도 그 뒤에 제공되지 않으며, 밀어낸 키가 인덱스에 남지 않습니다. 포크는 `hyve`와 같은 기준(측정으로 필요가 확인될 때)으로 미룹니다.
 
 외부 의존성(포크하지 않음, 2026-11-24 `cargo info` 확인): 패밀리 네이티브 런타임 `tokio` (`1.54.1`, `MIT` — `hyve/docs/02-architecture.md` §2.5), 라우터 `matchit`(위 표). 이 목록에 없는 의존성은 `hyperish/docs` `05-development-rules.md` §7의 외부 의존성 규칙에 따라 추가 기록합니다.

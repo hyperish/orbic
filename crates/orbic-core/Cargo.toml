@@ -14,6 +14,7 @@ hyve-core.workspace = true
 hyve-serde.workspace = true
 hyve-validate.workspace = true
 matchit.workspace = true
+orbic-cache.workspace = true
 
 [dev-dependencies]
 hyve = { workspace = true, features = ["test"] }

@@ -9,7 +9,12 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+hyve-api.workspace = true
 hyve-core.workspace = true
+quick_cache.workspace = true
+
+[dev-dependencies]
+hyve = { workspace = true, features = ["test"] }
 
 [lints]
 workspace = true

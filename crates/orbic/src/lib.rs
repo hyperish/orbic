@@ -13,14 +13,16 @@ pub use orbic_macros::{key, sql, table, tag, ttl};
 pub type OrbicResult<T> = hyve::HyveResult<T>;
 
 #[cfg(feature = "server")]
-pub use orbic_core::{BackendComponent, OrbicApp, component};
+pub use orbic_cache::{Cache, CacheOpts};
+#[cfg(feature = "server")]
+pub use orbic_core::{BackendComponent, OrbicApp, Principal, RateLimit, component};
 
 /// Everything most code needs: `use orbic::prelude::*;` (next to
 /// `use hyve::prelude::*;`).
 pub mod prelude {
     pub use crate::OrbicResult;
     #[cfg(feature = "server")]
-    pub use crate::{BackendComponent, OrbicApp, component};
+    pub use crate::{BackendComponent, Cache, CacheOpts, OrbicApp, RateLimit, component};
     pub use orbic_macros::{key, sql, table, tag, ttl};
 }
 

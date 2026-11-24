@@ -18,6 +18,7 @@ hyve = { workspace = true, features = ["test"] }
 orbic.workspace = true
 
 [dev-dependencies]
+orbic-cache.workspace = true
 orbic-core.workspace = true
 trybuild.workspace = true
 

@@ -11,11 +11,13 @@ use std::task::{Context, Poll, Waker};
 
 use hyve_api::{BoxFuture, ContextNeed, Method, ServerFnDescriptor, codes};
 use hyve_core::{HyveError, Scope};
+use orbic_cache::Cache;
 
 use crate::component::{BackendComponent, Endpoint};
 use crate::extract::Parts;
 use crate::guard::{Guard, GuardCtx};
 use crate::handler::Handler;
+use crate::idempotency::{self, Gate};
 use crate::request::{Rail, Request, Response, ResponseMeta};
 
 /// The application: a root component plus assembly into a [`Pipeline`].
@@ -180,9 +182,23 @@ impl Assembly {
         }
         let mut guards = guards.to_vec();
         for g in c.guards {
+            for need in g.needs() {
+                if !provided.iter().any(|p| p.type_id == need.type_id) {
+                    self.problems.push(format!(
+                        "guard `{}` wrapped at `{}` takes `{}`, but nothing provides it there \
+                         (provide it with `.provide(...)` on that component or one it is mounted under)",
+                        g.name(),
+                        if prefix.is_empty() { "/" } else { prefix },
+                        need.type_name
+                    ));
+                }
+            }
             provided.extend(g.provides());
             guards.push(g);
         }
+        let has_cache = provided
+            .iter()
+            .any(|p| p.type_id == ContextNeed::of::<Cache>().type_id);
         for r in c.routes {
             let Some(pattern) = join(prefix, &r.path) else {
                 self.problems.push(format!(
@@ -204,6 +220,12 @@ impl Assembly {
                         need.type_name
                     ));
                 }
+            }
+            if r.method == Method::Post && !has_cache {
+                self.problems.push(format!(
+                    "POST {pattern}: `POST` routes accept `Idempotency-Key`, which needs a `Cache` \
+                     provided here or above (`.provide(Cache::in_memory())`)"
+                ));
             }
             self.routes.push(Route {
                 method: r.method,
@@ -447,6 +469,15 @@ impl Inner {
                         g.check(&mut cx).await?;
                     }
                 }
+                let reservation = if method == Method::Post {
+                    match idempotency::begin(&scope, &req, meta)? {
+                        Ok(Gate::Pass) => None,
+                        Ok(Gate::Run(r)) => Some(r),
+                        Err(replayed) => return Ok(replayed),
+                    }
+                } else {
+                    None
+                };
                 let parts = Parts {
                     scope: scope.clone(),
                     rail: req.rail,
@@ -455,7 +486,11 @@ impl Inner {
                     body: req.body,
                     meta: req.meta,
                 };
-                (route.endpoint)(parts).await
+                let outcome = (route.endpoint)(parts).await;
+                if let Some(r) = reservation {
+                    idempotency::finish(r, &outcome);
+                }
+                outcome
             })
             .await;
         scope.dispose();

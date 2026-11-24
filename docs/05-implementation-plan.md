@@ -21,7 +21,7 @@ Phase 1(`v0.1.0`)의 작업 순서와 완료 기준입니다. Phase 1에 들어�
 |---|---|---|---|
 | 1 | `orbic-core` | `BackendComponent` 트리, `provide` 범위 해석, `wrap` 순서, 라우트 트리, 전송 중립 요청 파이프라인, 조립 시점 검증, 셧다운 조율 | 없음 |
 | 2 | `orbic-macros` | `#[table]`·`#[pk]`, `sql!`(캐시 읽기), `ttl!`·`key!`·`tag!` | 없음 |
-| 3 | `orbic-cache` 인메모리 저장소 | 세션·멱등 키·`RateLimit` 저장소, Singleflight, 태그 무효화 | 1 |
+| 3 | `orbic-cache` 인메모리 저장소 | 세션·멱등 키·`RateLimit` 저장소, Singleflight, 태그 무효화, `orbic-core`의 멱등성 게이트와 `RateLimit` 가드 | 1 |
 | 4 | `orbic-db` | `sqlx-core`와 드라이버 포크 편입, 체이닝 쿼리, 트랜잭션과 취소 시 롤백, 마이그레이션, `Db::in_memory()`, 임시 PostgreSQL 하네스, `hyve-orbic codegen`(`sql!` 캐시 생성과 점검) | 1, 2 |
 | 5 | `orbic-auth` | 불투명 세션, CSRF, Bearer, `AuthGuard`, 리프레시 회전, 철회 | 1, 3 |
 | 6 | `orbic-adapter-http` | `hyper` 포크 편입, 표준 레일, 고속 레일 요청-응답, CORS·보안 헤더·요청 크기 제한·`/health`·`/metrics`, 오류 변환 | 1 |
@@ -33,6 +33,7 @@ Phase 1(`v0.1.0`)의 작업 순서와 완료 기준입니다. Phase 1에 들어�
   - 파이프라인 테스트는 자기 `server` 피처를 가진 미배포 픽스처 크레이트 `orbic-tests`에 두고, CI가 피처를 끈 빌드와 켠 빌드를 모두 검사합니다.
   - 1단계 `orbic-core`의 요청은 세 레일(표준 JSON, 고속 바이너리, 직렬화 없는 인프로세스)을 받습니다. 라우트 매칭(고속 레일의 함수 식별자·스키마 지문 판정 포함)이 가드보다 먼저이고, 오류는 응답에 싣기 전에 공개 형태와 `requestId`를 갖춥니다. 프레임워크 오류 코드는 `route_not_found`, `method_not_allowed`, `unsupported_media_type`, `schema_mismatch`, 셧다운 중의 재시도 가능한 `service_unavailable`입니다.
   - 2단계 `orbic-macros`는 `#[table]`이 만드는 메타데이터와 `sql!` 결과가 기댈 타입(`orbic-db`의 값·테이블·`Sql`)과 `key!`·`tag!`의 키 타입(`orbic-cache`)을 함께 만듭니다. 이 크레이트들의 나머지는 3·4단계입니다. `sql!` 캐시 형식은 별도 크레이트 `orbic-sql-cache`입니다(`02-architecture.md` §1). §1 스케치의 `Id::new()` 인자는 바인딩할 타입이 정해지지 않아 `Id::<Project>::new()`로 고쳤습니다.
+  - 3단계: 열린 결정 2를 결정하면서 `orbic-core`가 `orbic-cache`에 의존합니다(저장소 계층이 아래). 그래서 게이트와 `RateLimit` 가드는 `orbic-core`에, 저장소는 `orbic-cache`에 있습니다. 표의 "앞선 단계 1"은 게이트와 가드가 1단계의 파이프라인 위에 놓인다는 뜻으로 남깁니다. L1은 `quick_cache =0.7.0`을 포크하지 않고 정확한 버전으로 고정해 씁니다(`02-architecture.md` §3 실행 기록).
 
 `.every`(잡)와 L2 캐시는 Phase 2, `.room`(실시간)과 MSA는 Phase 3입니다.
 

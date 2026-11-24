@@ -72,6 +72,26 @@ impl fmt::Debug for Credential {
     }
 }
 
+/// The authenticated principal of a request. Authentication guards provide
+/// it to the request scope; the `Idempotency-Key` gate and [`RateLimit`]
+/// scope their state by it (`hyperish/docs` `02-core-contracts.md` §6).
+///
+/// [`RateLimit`]: crate::RateLimit
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Principal(String);
+
+impl Principal {
+    /// A principal with a stable identifier (a user ID, not a token).
+    pub fn new(id: impl Into<String>) -> Self {
+        Principal(id.into())
+    }
+
+    /// The identifier.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Request metadata that is not part of the body.
 #[derive(Debug, Clone, Default)]
 pub struct RequestMeta {
