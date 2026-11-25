@@ -8,10 +8,13 @@
 //! - [`Sql`]: what `sql!` builds, checked against the offline cache and
 //!   refused (unsent) on a dialect it was not verified on.
 //! - [`Migrations`], and [`testing::TempPostgres`] for PostgreSQL tests.
+//! - [`OrbicConfig`]: `[orbic]` in `hyve.toml`; [`Db::from_config`] connects
+//!   to its `database_url` (`hyve preview` points it at a local database).
 //!
 //! The drivers are `sqlx` 0.9.1, pinned rather than forked
 //! (`docs/02-architecture.md` §3 실행 기록).
 
+mod config;
 mod db;
 #[cfg(feature = "codegen")]
 mod describe;
@@ -23,6 +26,7 @@ mod table;
 pub mod testing;
 mod value;
 
+pub use config::{DATABASE_URL_ENV, OrbicConfig};
 pub use db::{Db, Dialect, Exec, Target, Tx};
 #[cfg(feature = "codegen")]
 pub use describe::{Described, sql_type};

@@ -4,22 +4,10 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use hyve::prelude::*;
 use hyve_config::Loader;
 use orbic_db::testing::TempPostgres;
-use orbic_db::{Db, Described, Dialect, Migrations, SqlType};
+use orbic_db::{Db, Described, Dialect, Migrations, OrbicConfig, SqlType};
 use orbic_sql_cache::{CACHE_DIR, CachedQuery, Column, Param, file_name, scan};
-
-/// `[orbic]` in `hyve.toml`.
-#[model]
-#[derive(Debug, Clone, Default)]
-pub struct OrbicConfig {
-    /// The operational dialect: `postgres` or `sqlite`.
-    pub dialect: Option<String>,
-    /// Paths (relative to the workspace root) whose sources are not scanned,
-    /// e.g. compile-fail tests.
-    pub codegen_exclude: Vec<String>,
-}
 
 #[derive(Debug, Default)]
 pub struct Options {
@@ -41,13 +29,8 @@ pub async fn run(opts: Options) -> Result<String, String> {
             })?
         }
     };
-    let config = Loader::new()
-        .dir(&root)
-        .args(Vec::<String>::new())
-        .section("orbic")
-        .load::<OrbicConfig>()
-        .map_err(|e| e.to_string())?
-        .into_inner();
+    let config =
+        OrbicConfig::load_with(Loader::new().dir(&root)).map_err(|e| e.message().to_owned())?;
 
     let mut queries: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut report = String::new();

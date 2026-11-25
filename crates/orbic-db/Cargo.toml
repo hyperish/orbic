@@ -13,6 +13,7 @@ authors.workspace = true
 codegen = ["dep:sqlx-core", "dep:sqlx-sqlite", "dep:sqlx-postgres"]
 
 [dependencies]
+hyve.workspace = true
 hyve-api.workspace = true
 hyve-core.workspace = true
 hyve-serde.workspace = true

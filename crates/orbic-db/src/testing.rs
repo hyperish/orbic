@@ -96,7 +96,7 @@ async fn drop_database(server: &str, name: &str) {
 }
 
 /// `url` with its database replaced by `name`.
-fn with_database(url: &str, name: &str) -> String {
+pub fn with_database(url: &str, name: &str) -> String {
     let (base, query) = url
         .split_once('?')
         .map_or((url, None), |(b, q)| (b, Some(q)));
