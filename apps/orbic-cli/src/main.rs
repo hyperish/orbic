@@ -4,6 +4,7 @@
 //! hyve-orbic stages
 //! hyve-orbic codegen [--check] [--prune] [--root <dir>]
 //! hyve-orbic preview [--web] [--native]
+//! hyve-orbic --version | --help
 //! ```
 //!
 //! `stages` answers `hyve`'s question (`hyve/docs/01-dx-and-dsl.md` §2,
@@ -35,6 +36,17 @@ fn main() -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
+    match stage.as_str() {
+        "--version" | "-V" if rest.is_empty() => {
+            println!("hyve-orbic {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        "--help" | "-h" if rest.is_empty() => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        _ => {}
+    }
     if stage == "stages" && rest.is_empty() {
         println!("{}", env!("CARGO_PKG_VERSION"));
         println!("codegen");

@@ -147,3 +147,27 @@ fn stages_answer_hyve() {
         .unwrap();
     assert_eq!(o.status.code(), Some(2));
 }
+
+#[test]
+fn version_and_help() {
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_hyve-orbic"))
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    for flag in ["--version", "-V"] {
+        let o = run(&[flag]);
+        assert!(o.status.success(), "{flag}");
+        assert_eq!(
+            String::from_utf8(o.stdout).unwrap(),
+            format!("hyve-orbic {}\n", env!("CARGO_PKG_VERSION"))
+        );
+    }
+    for flag in ["--help", "-h"] {
+        let o = run(&[flag]);
+        assert!(o.status.success(), "{flag}");
+        assert!(String::from_utf8_lossy(&o.stdout).starts_with("usage: hyve-orbic"));
+    }
+    assert_eq!(run(&["--version", "x"]).status.code(), Some(2));
+}
