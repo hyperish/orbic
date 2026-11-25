@@ -51,7 +51,7 @@ pub use orbic_core::{
     component,
 };
 #[cfg(feature = "server")]
-pub use orbic_db::{Db, OrbicConfig, Tx};
+pub use orbic_db::{Db, Migrations, OrbicConfig, Tx};
 #[cfg(feature = "server")]
 pub use orbic_openapi::{OpenApiExt, OpenApiInfo};
 
