@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [main, "feat/**"]
   pull_request:
@@ -43,6 +44,11 @@ jobs:
           repository: hyperish/hyve
           ref: ${{ env.HYVE_REF }}
           path: hyve
+      - uses: actions/checkout@v4
+        with:
+          repository: hyperish/serge
+          ref: feat/phase1
+          path: serge
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -55,6 +61,16 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Run tests
         run: cargo test --workspace --locked
+      - name: Verify streaming SSR and atomic bundle replacement
+        run: cargo test --locked -p orbic --features serge --test site
+      - name: Verify registered timers in a running server
+        run: cargo test --locked -p orbic --features jobs --test schedules
+      - name: Verify service RPC, outbox transactions and signed webhook delivery
+        run: cargo test --locked -p orbic --features msa,notify --test msa --test webhooks
+      - name: Verify shared state across Valkey clients
+        run: bash scripts/test-cache.sh
+      - name: Verify resumable uploads against a local object store
+        run: bash scripts/test-storage-s3.sh
       # The fixture crate plays an app's shared crate; `#[server]` handler
       # bodies exist only with its `server` feature, so test both builds.
       - name: Lint and test with the server feature
@@ -76,6 +92,9 @@ jobs:
           cargo metadata --manifest-path ../hyve/Cargo.toml --no-deps --format-version 1 \
             | jq -r '"[patch.crates-io]", (.packages[] | select(.publish == null) | "\(.name) = { path = \"\(.manifest_path | rtrimstr("/Cargo.toml"))\" }")' \
             > "$RUNNER_TEMP/siblings.toml"
+          cargo metadata --manifest-path ../serge/Cargo.toml --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "serge-web-ssr" or .name == "serge-router" or .name == "serge-core" or .name == "serge-style") | "\(.name) = { path = \"\(.manifest_path | rtrimstr("/Cargo.toml"))\" }"' \
+            >> "$RUNNER_TEMP/siblings.toml"
           cargo package --workspace --exclude orbic-tests --config "$RUNNER_TEMP/siblings.toml"
 
   msrv:
@@ -93,6 +112,11 @@ jobs:
           repository: hyperish/hyve
           ref: ${{ env.HYVE_REF }}
           path: hyve
+      - uses: actions/checkout@v4
+        with:
+          repository: hyperish/serge
+          ref: feat/phase1
+          path: serge
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.MSRV }}
