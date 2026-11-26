@@ -25,7 +25,7 @@
    - **표준 호환 레일**: 외부 호환용 HTTPS/JSON + WebSocket(`03`, `04` 규약 준수) 및 `.openapi("/docs")` Swagger 자동 서빙.
    - **수직 통합 고속 레일**: `serge` ↔ `orbic` 및 `orbic` 내부 MSA 간 통신은 **`hyve-serde` 제로카피 바이너리**로 직결합니다. 요청-응답 호출은 `orbic-adapter-http`의 바이너리 본문으로, 스트림·실시간은 **WebTransport(QUIC)**로 나르며 UDP가 막히면 같은 바이너리 프레임을 WebSocket으로 운반합니다. 프론트에서 백엔드 핸들러를 일반 Rust 비동기 함수처럼 부르는 **인라인 서버 함수 호출**과 종단 간 취소 전파를 지원합니다.
 6. **파일 스토리지(`orbic-storage`) · 잡 큐/Cron(`orbic-jobs`) · 외부 알림/웹훅(`orbic-notify`) · `serge` 서빙**:
-   - 로컬 디스크 및 S3 / Cloudflare R2 추상화, Presigned 멀티파트 이어 올리기(`upload-parts`) 및 크기·체크섬 검증 후 활성화.
+   - 파일을 다루는 앱은 로컬 디스크 또는 S3 호환 객체 저장소를 선택할 수 있습니다. 객체 저장소는 서명 URL을 통한 멀티파트 이어 올리기(`upload-parts`)와 크기·체크섬 검증 후 활성화를 지원하는 설계입니다.
    - 지연 작업·지수 백오프 재시도·데드레터 큐(DLQ) 워커 및 분산 리더 락 기반 `.every(...)` / Cron 주기적 스케줄러(멀티 레플리카 중복 실행 방지).
    - 이메일(SMTP/API)·모바일/웹 푸시(APNs/FCM) 발송 어댑터 및 외부 웹훅 수신 시 HMAC 서명 검증.
    - [`serge`](https://github.com/hyperish/serge) 웹 빌드의 프로덕션 서빙·SSR 호스팅(`orbic-adapter-serge`).
