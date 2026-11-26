@@ -1,8 +1,8 @@
-//! `hyve-orbic preview` (`docs/01-dx-and-dsl.md` §3, 로컬 개발·프리뷰):
+//! `hyve-orbic dev` (`docs/01-dx-and-dsl.md` §3, 로컬 개발 환경):
 //! builds every server the workspace declares
 //! (`[package.metadata.orbic.server]`), runs the built binaries, and when a
 //! source changes rebuilds them and restarts each one whose binary changed.
-//! Under `hyve preview` (`HYVE_STAGE_LIFELINE=stdin`) it stops the servers
+//! Under `hyve dev` (`HYVE_STAGE_LIFELINE=stdin`) it stops the servers
 //! and exits when its stdin closes.
 //!
 //! In a hyve workspace (a `hyve.toml`), it also keeps the `sql!` cache
@@ -12,8 +12,8 @@
 //! or a database on the `HYPERISH_TEST_POSTGRES_URL` server when the
 //! operational dialect is PostgreSQL. It keeps its data across restarts and
 //! gets the workspace's migrations, at start and when `migrations/` changes.
-//! A `HYPERISH_ORBIC_DATABASE_URL` already in the environment is the user's
-//! choice: it is passed through, and preview creates and migrates nothing.
+//! When the user sets `HYPERISH_ORBIC_DATABASE_URL`, the CLI passes it to
+//! the server and skips local database setup.
 //!
 //! ```toml
 //! [package.metadata.orbic.server]
@@ -36,10 +36,11 @@ use orbic_db::{DATABASE_URL_ENV, Db, Dialect, Migrations, OrbicConfig};
 pub(crate) struct Server {
     pub(crate) package: String,
     pub(crate) bin: String,
+    pub(crate) cache_features: Vec<String>,
     pub(crate) features: Vec<String>,
 }
 
-/// What `preview` needs from `cargo metadata`.
+/// What `dev` needs from `cargo metadata`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Workspace {
     pub(crate) root: PathBuf,
@@ -138,8 +139,28 @@ pub(crate) fn parse(meta: &Value) -> Result<Workspace, String> {
             .iter()
             .filter_map(|f| string(Some(f)).map(str::to_owned))
             .collect();
+        let cache_features = match declared.get("cache_features") {
+            Some(Value::List(features)) => features
+                .iter()
+                .map(|f| {
+                    string(Some(f))
+                        .map(str::to_owned)
+                        .ok_or("cache_features must contain feature names")
+                })
+                .collect::<Result<_, _>>()?,
+            Some(_) => return Err(format!("cache_features for `{name}` must be a list")),
+            None if p
+                .get("features")
+                .and_then(|f| f.get("cache-redis"))
+                .is_some() =>
+            {
+                vec!["cache-redis".into()]
+            }
+            None => Vec::new(),
+        };
         servers.push(Server {
             package: name,
+            cache_features,
             bin,
             features,
         });
@@ -191,14 +212,18 @@ pub(crate) struct Harness {
     pub(crate) url: Option<String>,
 }
 
-/// One preview database per workspace, whichever directory it is reached
-/// from: FNV-1a of the root's path.
-fn preview_database_name(root: &Path) -> String {
+/// FNV-1a of the workspace root identifies its persistent development database.
+/// The prefix is part of the database name used by earlier CLI releases.
+fn workspace_hash(root: &Path) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in root.to_string_lossy().bytes() {
         h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
     }
-    format!("orbic_preview_{h:016x}")
+    h
+}
+
+fn workspace_database_name(root: &Path) -> String {
+    format!("orbic_preview_{:016x}", workspace_hash(root))
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -219,7 +244,7 @@ pub(crate) fn harness(
     };
     if env(DATABASE_URL_ENV).is_some() {
         eprintln!(
-            "hyve-orbic: the servers use {DATABASE_URL_ENV} from the environment; preview creates and migrates nothing there"
+            "hyve-orbic: the servers use {DATABASE_URL_ENV} from the environment (skipping local database setup)"
         );
         return Ok(Some(Harness { root, url: None }));
     }
@@ -228,7 +253,7 @@ pub(crate) fn harness(
     let dialect = config.dialect.as_deref().and_then(Dialect::parse);
     if dialect == Some(Dialect::Postgres) {
         if let Some(server) = env(POSTGRES_URL_ENV) {
-            let name = preview_database_name(&root);
+            let name = workspace_database_name(&root);
             runtime()
                 .block_on(async {
                     let admin = Db::connect(&server).await?;
@@ -241,16 +266,17 @@ pub(crate) fn harness(
                         _ => Ok(()),
                     }
                 })
-                .map_err(|e| format!("the preview database `{name}`: {}", e.message()))?;
+                .map_err(|e| format!("the local development database `{name}`: {}", e.message()))?;
             return Ok(Some(Harness {
                 url: Some(with_database(&server, &name)),
                 root,
             }));
         }
         eprintln!(
-            "hyve-orbic: the operational dialect is PostgreSQL but {POSTGRES_URL_ENV} is not set; the preview database is SQLite, where a `sql!` verified only on PostgreSQL returns an error"
+            "hyve-orbic: the operational dialect is PostgreSQL but {POSTGRES_URL_ENV} is not set; the local development database is SQLite, where a `sql!` verified only on PostgreSQL returns an error"
         );
     }
+    // Earlier CLI releases store the workspace's SQLite data here as well.
     let dir = ws.target.join("orbic-preview");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let url = format!("sqlite:{}?mode=rwc", dir.join("db.sqlite").display());
@@ -260,7 +286,7 @@ pub(crate) fn harness(
     }))
 }
 
-/// Applies the workspace's migrations to the preview database.
+/// Applies the workspace's migrations to the local development database.
 fn migrate(h: &Harness) -> Result<(), String> {
     let (Some(url), dir) = (&h.url, h.root.join("migrations")) else {
         return Ok(());
@@ -278,7 +304,7 @@ fn migrate(h: &Harness) -> Result<(), String> {
 }
 
 /// `hyve-orbic codegen` as a child (it finishes, and drops any temporary
-/// database, even if preview is stopped meanwhile). Quiet when nothing
+/// database, even if the development session stops meanwhile). Quiet when nothing
 /// changed; a failure is reported and the build goes on.
 fn codegen(root: &Path) {
     let Ok(me) = std::env::current_exe() else {
@@ -321,13 +347,17 @@ fn modified(p: &Path) -> Option<SystemTime> {
 }
 
 /// `cargo build` of the server (its errors go to the terminal).
-fn build(ws: &Workspace, s: &Server) -> bool {
+fn build(ws: &Workspace, s: &Server, shared_cache: bool) -> bool {
     let mut cmd = Command::new(cargo());
     cmd.args(["build", "-p", &s.package, "--bin", &s.bin])
         .current_dir(&ws.root)
         .stdin(Stdio::null());
-    if !s.features.is_empty() {
-        cmd.arg("--features").arg(s.features.join(","));
+    let mut features = s.features.clone();
+    if shared_cache {
+        features.extend_from_slice(&s.cache_features);
+    }
+    if !features.is_empty() {
+        cmd.arg("--features").arg(features.join(","));
     }
     cmd.status().is_ok_and(|st| st.success())
 }
@@ -350,11 +380,17 @@ fn stop(child: &mut Option<Child>) {
 pub(crate) fn run(ws: &Workspace) -> Result<(), String> {
     if ws.servers.is_empty() {
         return Err(
-            "no server to preview: declare one in its package's Cargo.toml, `[package.metadata.orbic.server]` with `bin = \"<binary>\"`"
+            "declare a local server in its package's Cargo.toml, `[package.metadata.orbic.server]` with `bin = \"<binary>\"`"
                 .into(),
         );
     }
     let harness = harness(ws, |k| std::env::var(k).ok())?;
+    let cache_url = std::env::var_os("HYPERISH_ORBIC_CACHE_URL")
+        .or_else(|| std::env::var_os("HYPERISH_TEST_REDIS_URL"));
+    let cache_namespace = std::env::var_os("HYPERISH_ORBIC_CACHE_NAMESPACE").unwrap_or_else(|| {
+        let root = ws.root.canonicalize().unwrap_or_else(|_| ws.root.clone());
+        format!("dev-{:016x}", workspace_hash(&root)).into()
+    });
     let running = Arc::new(Mutex::new(Running {
         children: ws.servers.iter().map(|_| None).collect(),
         stopping: false,
@@ -386,6 +422,10 @@ pub(crate) fn run(ws: &Workspace) -> Result<(), String> {
         if let Some(url) = harness.as_ref().and_then(|h| h.url.as_ref()) {
             cmd.env(DATABASE_URL_ENV, url);
         }
+        if let Some(url) = &cache_url {
+            cmd.env("HYPERISH_ORBIC_CACHE_URL", url)
+                .env("HYPERISH_ORBIC_CACHE_NAMESPACE", &cache_namespace);
+        }
         match cmd.spawn() {
             Ok(child) => {
                 eprintln!("hyve-orbic: `{}` is running", s.bin);
@@ -410,7 +450,7 @@ pub(crate) fn run(ws: &Workspace) -> Result<(), String> {
     prepare(true);
     let mut running_build: Vec<Option<SystemTime>> = vec![None; ws.servers.len()];
     for (i, s) in ws.servers.iter().enumerate() {
-        if build(ws, s) {
+        if build(ws, s, cache_url.is_some()) {
             running_build[i] = start(i, s);
         } else {
             eprintln!(
@@ -466,7 +506,7 @@ pub(crate) fn run(ws: &Workspace) -> Result<(), String> {
         applied = migrations_stamp();
         prepare(schema_changed);
         for (i, s) in ws.servers.iter().enumerate() {
-            if !build(ws, s) {
+            if !build(ws, s, cache_url.is_some()) {
                 eprintln!(
                     "hyve-orbic: the build of `{}` failed; the server keeps running the last build",
                     s.bin
@@ -505,7 +545,7 @@ mod tests {
     #[test]
     fn servers_come_from_package_metadata() {
         let ws = parse(&meta(
-            r#"{"orbic":{"server":{"bin":"api","features":["server"]}}}"#,
+            r#"{"orbic":{"server":{"bin":"api","features":["server"],"cache_features":["cache-redis","orbic/cache-redis"]}}}"#,
             &["app", "api"],
         ))
         .unwrap();
@@ -517,6 +557,7 @@ mod tests {
         assert_eq!(
             ws.servers,
             [Server {
+                cache_features: vec!["cache-redis".into(), "orbic/cache-redis".into()],
                 package: "app".into(),
                 bin: "api".into(),
                 features: vec!["server".into()],

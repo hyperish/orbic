@@ -1,5 +1,5 @@
-//! `hyve-orbic preview` on a real (tiny) workspace: `stages` lists
-//! `preview` only when a server is declared; the server starts, restarts on
+//! `hyve-orbic dev` on a real (tiny) workspace: `stages` lists
+//! `dev` only when a server is declared; the server starts, restarts on
 //! a source change with the old process gone, is left alone when its
 //! binary did not change, is reported when it exits on its own, and is
 //! stopped with the tool when the `hyve` lifeline (stdin) closes.
@@ -14,12 +14,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 fn workspace(declared: bool) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("orbic-preview-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(dir.join("src")).unwrap();
+    let dir = std::env::temp_dir().join(format!("orbic-dev-{}", hyve::Ulid::new()));
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::create_dir(dir.join("src")).unwrap();
     let decl = if declared {
         "\n[package.metadata.orbic.server]\nbin = \"srv\"\n"
     } else {
@@ -63,8 +60,8 @@ fn alive(pid: u32) -> bool {
 }
 
 #[test]
-fn stages_list_preview_only_with_a_declared_server() {
-    for (declared, want) in [(false, "codegen"), (true, "codegen\npreview")] {
+fn stages_list_dev_only_with_a_declared_server() {
+    for (declared, want) in [(false, "codegen"), (true, "codegen\ndev")] {
         let dir = workspace(declared);
         let out = tool(&dir).arg("stages").output().unwrap();
         assert!(out.status.success());
@@ -76,10 +73,10 @@ fn stages_list_preview_only_with_a_declared_server() {
 }
 
 #[test]
-fn preview_runs_restarts_and_stops_the_server() {
+fn dev_runs_restarts_and_stops_the_server() {
     let dir = workspace(true);
     let mut child = tool(&dir)
-        .args(["preview", "--web"])
+        .args(["dev", "--web"])
         .env("HYVE_STAGE_LIFELINE", "stdin")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -173,18 +170,18 @@ fn preview_runs_restarts_and_stops_the_server() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A running `hyve-orbic preview` under a lifeline, with its stdout lines
+/// A running `hyve-orbic dev` under a lifeline, with its stdout lines
 /// and stderr text.
-struct Preview {
+struct DevSession {
     child: std::process::Child,
     lines: mpsc::Receiver<String>,
     log: Arc<Mutex<String>>,
 }
 
-impl Preview {
-    fn start(dir: &Path, env: &[(&str, &str)]) -> Preview {
+impl DevSession {
+    fn start(dir: &Path, env: &[(&str, &str)]) -> DevSession {
         let mut cmd = tool(dir);
-        cmd.args(["preview", "--web"])
+        cmd.args(["dev", "--web"])
             .env("HYVE_STAGE_LIFELINE", "stdin")
             .env_remove("HYPERISH_ORBIC_DATABASE_URL")
             .stdin(Stdio::piped())
@@ -215,7 +212,7 @@ impl Preview {
                     .push_str(&String::from_utf8_lossy(&buf[..n]));
             }
         });
-        Preview { child, lines, log }
+        DevSession { child, lines, log }
     }
 
     /// The pid and database URL of the next `srv up <version>`.
@@ -271,7 +268,7 @@ fn db_server_source(dir: &Path, version: u32, queries: &[&str]) {
 
 fn db_workspace(dialect: &str) -> PathBuf {
     let dir = workspace(true);
-    // A decoy: preview's local database wins over it.
+    // A decoy: the local development database wins over it.
     std::fs::write(
         dir.join("hyve.toml"),
         format!("[orbic]\ndialect = \"{dialect}\"\ndatabase_url = \"sqlite:/nonexistent/decoy.sqlite\"\n"),
@@ -310,10 +307,10 @@ fn exec(url: &str, sql: &str) -> Result<(), String> {
 }
 
 #[test]
-fn preview_gives_the_servers_a_local_database_and_keeps_the_sql_cache() {
+fn dev_gives_the_servers_a_local_database_and_keeps_the_sql_cache() {
     let dir = db_workspace("sqlite");
-    let preview = Preview::start(&dir, &[]);
-    let (first, url) = preview.up(1);
+    let session = DevSession::start(&dir, &[]);
+    let (first, url) = session.up(1);
     assert!(
         url.starts_with("sqlite:") && url.contains("orbic-preview") && !url.contains("decoy"),
         "{url}"
@@ -330,7 +327,7 @@ fn preview_gives_the_servers_a_local_database_and_keeps_the_sql_cache() {
         "CREATE TABLE tags (id INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL);\n",
     )
     .unwrap();
-    let (second, again) = preview.up(1);
+    let (second, again) = session.up(1);
     assert_ne!(first, second);
     assert!(!alive(first));
     assert_eq!(again, url, "the same database across restarts");
@@ -344,9 +341,9 @@ fn preview_gives_the_servers_a_local_database_and_keeps_the_sql_cache() {
         2,
         &["SELECT id, body FROM notes", "SELECT name FROM tags"],
     );
-    preview.up(2);
+    session.up(2);
     assert_eq!(cached(&dir), 2);
-    preview.stop();
+    session.stop();
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -355,11 +352,14 @@ fn a_database_url_in_the_environment_is_passed_through_untouched() {
     let dir = db_workspace("sqlite");
     let theirs = dir.join("theirs.sqlite");
     let url = format!("sqlite:{}?mode=rwc", theirs.display());
-    let preview = Preview::start(&dir, &[("HYPERISH_ORBIC_DATABASE_URL", &url)]);
-    let (_, got) = preview.up(1);
+    let session = DevSession::start(&dir, &[("HYPERISH_ORBIC_DATABASE_URL", &url)]);
+    let (_, got) = session.up(1);
     assert_eq!(got, url);
-    preview.stop();
-    assert!(!theirs.exists(), "preview created nothing on it");
+    session.stop();
+    assert!(
+        !theirs.exists(),
+        "the supplied database was created unexpectedly"
+    );
     assert!(!dir.join("target/orbic-preview").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -370,8 +370,8 @@ fn a_postgres_workspace_gets_its_own_database_on_the_test_server() {
         "HYPERISH_TEST_POSTGRES_URL is not set; PostgreSQL tests need a server (e.g. postgres://postgres@127.0.0.1:5432/postgres)",
     );
     let dir = db_workspace("postgres");
-    let preview = Preview::start(&dir, &[("HYPERISH_TEST_POSTGRES_URL", &server)]);
-    let (_, url) = preview.up(1);
+    let session = DevSession::start(&dir, &[("HYPERISH_TEST_POSTGRES_URL", &server)]);
+    let (_, url) = session.up(1);
     let name = url
         .rsplit('/')
         .next()
@@ -387,12 +387,12 @@ fn a_postgres_workspace_gets_its_own_database_on_the_test_server() {
     )
     .unwrap();
     assert_eq!(cached(&dir), 1);
-    preview.stop();
-    // A second preview of the same workspace reuses it.
-    let preview = Preview::start(&dir, &[("HYPERISH_TEST_POSTGRES_URL", &server)]);
-    let (_, again) = preview.up(1);
+    session.stop();
+    // The next development session in the same workspace reuses it.
+    let session = DevSession::start(&dir, &[("HYPERISH_TEST_POSTGRES_URL", &server)]);
+    let (_, again) = session.up(1);
     assert_eq!(again, url);
-    preview.stop();
+    session.stop();
     let _ = exec(
         &server,
         &format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)"),
