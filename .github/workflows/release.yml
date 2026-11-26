@@ -41,12 +41,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: hyperish/hyve
-          ref: feat/phase1
+          ref: ab3b833cdf5bfd5ea32d5f20b92fc198447d70d8
           path: hyve
       - uses: actions/checkout@v4
         with:
           repository: hyperish/serge
-          ref: feat/phase1
+          ref: d58cdedd6fc7aa71c1532b3c2e709819d9e70ba8
           path: serge
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
