@@ -6,15 +6,73 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 readme = "../../README.md"
 keywords = ["hyperish", "backend", "web", "framework", "api"]
 categories = ["web-programming::http-server", "asynchronous"]
 
+[features]
+default = ["server"]
+## Serve server functions on same-user Unix sockets and Windows pipes.
+ipc = ["server", "orbic-adapter-http/ipc", "hyve/ipc"]
+## Serve validated Serge production bundles with guarded routes and streaming SSR.
+serge = ["server","dep:orbic-adapter-serge","orbic-adapter-http/serge"]
+## Shared Redis/Valkey cache, sessions, request limits, and idempotency.
+cache-redis = ["server", "orbic-cache/redis"]
+## Stream and verify file uploads on local disk.
+storage = ["dep:orbic-storage"]
+## Support multipart uploads to an app-configured S3-compatible bucket.
+storage-s3 = ["storage", "orbic-storage/s3"]
+## Durable background work using the app's database.
+jobs = ["server", "dep:orbic-jobs"]
+## Durable realtime rooms over WebTransport and WebSocket.
+realtime = ["server", "dep:orbic-realtime"]
+## Service discovery, traced RPC and transactional service events.
+msa = ["server", "dep:orbic-msa"]
+## Send configured email and push notifications and receive signed webhooks.
+notify = ["server", "dep:orbic-notify"]
+## The runtime (pipeline, database, cache). Shared crates depend on orbic
+## without default features and enable this from their own `server` feature,
+## so client builds (wasm32 included) link only the macros.
+server = [
+    "dep:bytes",
+    "dep:http",
+    "dep:orbic-adapter-http",
+    "dep:orbic-auth",
+    "dep:orbic-cache",
+    "dep:orbic-core",
+    "dep:orbic-db",
+    "dep:orbic-openapi",
+    "dep:tokio",
+]
+
 [dependencies]
-hyve = { git = "https://github.com/hyperish/hyve.git", branch = "main" }
-orbic-macros = { path = "../orbic-macros", version = "0.0.1-alpha.0" }
+bytes = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+hyve.workspace = true
+orbic-adapter-serge = { workspace = true, optional = true }
+orbic-adapter-http = { workspace = true, optional = true }
+orbic-auth = { workspace = true, optional = true }
+orbic-cache = { workspace = true, optional = true }
+orbic-core = { workspace = true, optional = true }
+orbic-db = { workspace = true, optional = true }
+orbic-jobs = { workspace = true, optional = true }
+orbic-msa = { workspace = true, optional = true }
+orbic-notify = { workspace = true, optional = true }
+orbic-macros.workspace = true
+orbic-openapi = { workspace = true, optional = true }
+orbic-realtime = { workspace = true, optional = true }
+orbic-storage = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["macros", "net"] }
+
+[dev-dependencies]
+ring.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+futures-util.workspace = true
+tokio = { workspace=true,features=["io-util", "sync", "time"] }
 
 [lints]
 workspace = true

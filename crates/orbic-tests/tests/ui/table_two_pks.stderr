@@ -1,0 +1,6 @@
+error: `#[pk]` is on both `id` and `other`
+         = help: Phase 1 tables have a single-column primary key; mark one field
+ --> tests/ui/table_two_pks.rs:6:9
+  |
+6 |     pub other: u32,
+  |         ^^^^^

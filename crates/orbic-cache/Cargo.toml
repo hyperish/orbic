@@ -1,0 +1,27 @@
+[package]
+name = "orbic-cache"
+description = "Cache keys and tags, in-memory cache with Singleflight and tag invalidation, idempotency and rate-limit stores for orbic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+redis = ["dep:fred", "dep:bytes", "dep:tokio"]
+
+[dependencies]
+bytes = { workspace = true, optional = true }
+fred = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["rt", "time"], optional = true }
+hyve-api.workspace = true
+hyve-core.workspace = true
+quick_cache.workspace = true
+
+[dev-dependencies]
+hyve = { workspace = true, features = ["test"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "sync"] }
+
+[lints]
+workspace = true

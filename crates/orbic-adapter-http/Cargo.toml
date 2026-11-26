@@ -1,0 +1,27 @@
+[package]
+name = "orbic-adapter-http"
+description = "HTTP/1.1 adapter for orbic: standard (JSON) and fast (binary) rails, CORS, security headers, size limits, /health, /metrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+ipc = ["hyve/ipc"]
+serge = ["dep:orbic-adapter-serge"]
+
+[dependencies]
+orbic-adapter-serge = { workspace = true, optional = true }
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+hyve.workspace = true
+orbic-core.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,33 @@
+[package]
+name = "orbic-realtime"
+description = "Authenticated, durable realtime rooms over WebTransport and WebSocket"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+futures-util = { workspace = true, features = ["sink"] }
+hyve.workspace = true
+orbic-auth.workspace = true
+orbic-cache.workspace = true
+orbic-core.workspace = true
+orbic-db.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "time", "sync", "rt", "macros"] }
+tokio-tungstenite.workspace = true
+tokio-util = { workspace = true, features = ["codec"] }
+wtransport.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+wtransport = { workspace = true, features = ["self-signed"] }
+
+[lints]
+workspace = true

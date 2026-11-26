@@ -1,0 +1,23 @@
+[package]
+name = "orbic-cli"
+description = "hyve-orbic: the orbic tool stages hyve runs (codegen: the sql! offline cache; dev: the local server)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "hyve-orbic"
+path = "src/main.rs"
+
+[dependencies]
+hyve-config.workspace = true
+hyve.workspace = true
+orbic-db = { workspace = true, features = ["codegen"] }
+orbic-sql-cache.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+
+[lints]
+workspace = true

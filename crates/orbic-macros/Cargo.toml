@@ -1,16 +1,23 @@
 [package]
 name = "orbic-macros"
-description = "Backend procedural macros (#[table], compile-time sql!) for orbic"
+description = "Procedural macros for orbic: #[table], #[pk], sql!, ttl!, key!, tag!"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 
 [lib]
 proc-macro = true
+
+[dependencies]
+hyve-diagnostics.workspace = true
+hyve-parser.workspace = true
+orbic-sql-cache.workspace = true
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
 
 [lints]
 workspace = true

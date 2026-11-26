@@ -1,0 +1,1 @@
+{"sql":"UPDATE projects SET title = $1 WHERE id = $2","params":[{"type":"text"},{"type":"text"}],"columns":[],"dialects":["postgres","sqlite"]}

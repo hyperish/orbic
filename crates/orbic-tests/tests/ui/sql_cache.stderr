@@ -1,0 +1,27 @@
+error: this query is not in the offline cache (.orbic/sql/03bf50964ca4b7fa.json)
+         = help: run `hyve codegen` to analyze the query and commit the files it writes to `.orbic/sql/`
+ --> tests/ui/sql_cache.rs:3:25
+  |
+3 |     let _ = orbic::sql!("SELECT 'not cached'");
+  |                         ^^^^^^^^^^^^^^^^^^^^^
+
+error: the query takes 1 parameter(s), but 0 argument(s) were given
+         = help: pass one argument per `$n` placeholder, in order
+ --> tests/ui/sql_cache.rs:4:25
+  |
+4 |     let _ = orbic::sql!("SELECT * FROM projects WHERE owner_id = $1");
+  |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: the query returns columns (id, title); name the model rows decode into
+         = help: write `sql!(Model, "...", ...)`
+ --> tests/ui/sql_cache.rs:5:25
+  |
+5 |     let _ = orbic::sql!("SELECT id, title FROM projects");
+  |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: `sql!` takes an optional model type, the query as a string literal, then one argument per parameter
+         = help: write `sql!(Project, "SELECT * FROM projects WHERE id = $1", id)`, or `sql!("UPDATE ...", args...)` for statements without rows
+ --> tests/ui/sql_cache.rs:6:25
+  |
+6 |     let _ = orbic::sql!(42);
+  |                         ^^

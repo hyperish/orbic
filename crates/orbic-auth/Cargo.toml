@@ -1,0 +1,22 @@
+[package]
+name = "orbic-auth"
+description = "Opaque sessions for orbic: web cookies with CSRF, native Bearer tokens, refresh rotation, revocation, AuthGuard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+getrandom.workspace = true
+hyve.workspace = true
+orbic-cache.workspace = true
+orbic-core.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+hyve = { workspace = true, features = ["test"] }
+
+[lints]
+workspace = true

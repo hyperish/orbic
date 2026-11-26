@@ -1,0 +1,21 @@
+[package]
+name="orbic-adapter-serge"
+description="Guarded Serge bundle hosting and cancellable streaming SSR for Orbic"
+version.workspace=true
+edition.workspace=true
+rust-version.workspace=true
+license.workspace=true
+repository.workspace=true
+authors.workspace=true
+[dependencies]
+bytes.workspace=true
+futures-util.workspace=true
+http.workspace=true
+http-body-util.workspace=true
+hyper.workspace=true
+hyve.workspace=true
+orbic-core.workspace=true
+serge-web-ssr.workspace=true
+tokio={workspace=true,features=["macros"]}
+[lints]
+workspace=true

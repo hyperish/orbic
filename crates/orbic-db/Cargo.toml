@@ -1,0 +1,30 @@
+[package]
+name = "orbic-db"
+description = "Type-safe chaining queries, offline-checked sql!, transactions and migrations for orbic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+## Query analysis for `hyve-orbic codegen` (sqlx's `describe`).
+codegen = ["dep:sqlx-core", "dep:sqlx-sqlite", "dep:sqlx-postgres"]
+
+[dependencies]
+hyve.workspace = true
+hyve-api.workspace = true
+hyve-core.workspace = true
+hyve-serde.workspace = true
+sqlx.workspace = true
+sqlx-core = { version = "=0.9.1", optional = true, features = ["offline"] }
+sqlx-postgres = { version = "=0.9.1", optional = true, features = ["offline"] }
+sqlx-sqlite = { version = "=0.9.1", optional = true, features = ["offline"] }
+tokio = { workspace = true, features = ["sync", "rt"] }
+
+[dev-dependencies]
+hyve = { workspace = true, features = ["test"] }
+
+[lints]
+workspace = true

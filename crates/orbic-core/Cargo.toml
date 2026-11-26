@@ -1,0 +1,30 @@
+[package]
+name = "orbic-core"
+description = "BackendComponent tree, transport-neutral request pipeline and assembly checks for orbic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+jobs = ["dep:chrono", "dep:cron", "dep:hyve-parser"]
+
+[dependencies]
+chrono = { workspace = true, optional = true }
+cron = { workspace = true, optional = true }
+hyve-parser = { workspace = true, optional = true }
+hyve-api.workspace = true
+hyve-core.workspace = true
+hyve-trace.workspace = true
+hyve-serde.workspace = true
+hyve-validate.workspace = true
+matchit.workspace = true
+orbic-cache.workspace = true
+
+[dev-dependencies]
+hyve = { workspace = true, features = ["test"] }
+
+[lints]
+workspace = true

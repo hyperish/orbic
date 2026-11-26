@@ -1,0 +1,20 @@
+error: invalid TTL "soon": invalid duration `soon`
+         = help: a duration is a number followed by a unit (`d`, `h`, `m`, `s` or `ms`), e.g. `1h30m`
+ --> tests/ui/ttl_invalid.rs:2:25
+  |
+2 |     let _ = orbic::ttl!("soon");
+  |                         ^^^^^^
+
+error: a TTL must be longer than zero
+         = help: write e.g. `30s`; to skip caching, do not cache
+ --> tests/ui/ttl_invalid.rs:3:25
+  |
+3 |     let _ = orbic::ttl!("0s");
+  |                         ^^^^
+
+error: `ttl!` takes one string literal
+         = help: write `ttl!("30s")`
+ --> tests/ui/ttl_invalid.rs:4:25
+  |
+4 |     let _ = orbic::ttl!(30);
+  |                         ^^

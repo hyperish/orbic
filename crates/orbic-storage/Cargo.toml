@@ -1,0 +1,27 @@
+[package]
+name = "orbic-storage"
+description = "Resumable, verified file storage on local disk or S3-compatible endpoints"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[features]
+s3 = ["dep:rust-s3", "dep:futures-util"]
+
+[dependencies]
+hyve.workspace = true
+orbic-core.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }
+rust-s3 = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

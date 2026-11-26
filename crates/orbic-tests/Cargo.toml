@@ -1,0 +1,35 @@
+[package]
+name = "orbic-tests"
+description = "Pipeline and contract tests for orbic (fixture crate, not published)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[features]
+cache-redis = ["server", "orbic/cache-redis"]
+## Plays an app's `server` feature: keeps `#[server]` handler bodies.
+server = ["orbic/server"]
+
+[dependencies]
+hyve = { workspace = true, features = ["test"] }
+orbic.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+orbic-adapter-http.workspace = true
+orbic-cache.workspace = true
+orbic-core.workspace = true
+orbic-openapi.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+trybuild.workspace = true
+
+[lints]
+workspace = true

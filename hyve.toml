@@ -1,0 +1,7 @@
+# The fixture app workspace of orbic's own tests (crates/orbic-tests): its
+# migrations/ and .orbic/sql/ live here, next to this file.
+
+[orbic]
+dialect = "postgres"
+# Compile-fail tests use queries that must stay out of the cache.
+codegen_exclude = ["crates/orbic-tests/tests/ui", "crates/orbic-tests/tests/ui-server"]

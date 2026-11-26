@@ -1,0 +1,18 @@
+[package]
+name = "orbic-jobs"
+description = "Durable leased jobs and UTC schedules on the application's SQLite or PostgreSQL database"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hyve.workspace = true
+orbic-core = { workspace = true, features = ["jobs"] }
+orbic-db.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
+
+[lints]
+workspace = true
