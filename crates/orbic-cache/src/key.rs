@@ -98,6 +98,9 @@ macro_rules! key_type {
                 self
             }
 
+            #[cfg(feature="redis")]
+            pub(crate) fn encoded(text: &str) -> Self {Self(text.to_owned())}
+
             /// The encoded text.
             pub fn as_str(&self) -> &str {
                 &self.0

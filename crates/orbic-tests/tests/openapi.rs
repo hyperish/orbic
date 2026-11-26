@@ -19,10 +19,15 @@ use orbic_tests::{
     AuthGuard, CurrentUser, Note, Store, add_note, delete_note, find_notes, get_note, rename_note,
 };
 
-#[model]
+#[model(check = valid_login)]
 #[derive(Debug, Clone)]
 struct Login {
+    #[validate(pattern = r"\S")]
     name: String,
+}
+
+fn valid_login(login: &Login) -> bool {
+    !login.name.contains('\n')
 }
 
 async fn login(input: Valid<Login>) -> HyveResult<SignedIn> {
@@ -277,6 +282,9 @@ async fn the_document_describes_the_wire() {
     assert!(params("/me", "post").contains(&("X-CSRF-Token".into(), "header".into(), false)));
 
     // Bodies and constraints come from the models.
+    let login = at(&doc, &["components", "schemas", "Login"]);
+    assert_eq!(at(login, &["x-hyve-check"]), &Value::Bool(true));
+    assert_eq!(s(at(login, &["properties", "name", "x-hyve-regex"])), r"\S");
     assert_eq!(
         s(at(
             &doc,

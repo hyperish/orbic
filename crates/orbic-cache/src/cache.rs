@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use hyve_api::Wire;
 use hyve_core::{HyveError, HyveResult};
+use quick_cache::sync::{EntryAction, EntryResult};
 
 use crate::clock::Clock;
 use crate::idempotency::IdempotencyStore;
@@ -49,12 +50,24 @@ impl CacheOpts {
 }
 
 struct Entry {
+    #[cfg(feature = "redis")]
+    revision: Option<String>,
     value: Arc<dyn Any + Send + Sync>,
     type_name: &'static str,
-    expires: Instant,
-    /// The invalidation sequence when loading started.
-    loaded: u64,
+    /// None delivers only to callers already waiting on this load.
+    expires: Option<Instant>,
+    /// Last generation at which every tag was checked, initially the start of the load.
+    validated: AtomicU64,
     tags: Box<[Tag]>,
+}
+
+#[derive(Clone)]
+struct Admission;
+impl quick_cache::Weighter<CacheKey, Arc<Entry>> for Admission {
+    fn weight(&self, _: &CacheKey, entry: &Arc<Entry>) -> u64 {
+        // quick_cache publishes to its placeholder's waiters before checking admission.
+        if entry.expires.is_some() { 1 } else { u64::MAX }
+    }
 }
 
 #[derive(Default)]
@@ -73,13 +86,26 @@ struct Tags {
 pub struct Cache(Arc<Inner>);
 
 struct Inner {
-    l1: quick_cache::sync::Cache<CacheKey, Arc<Entry>>,
+    #[cfg(feature = "redis")]
+    redis: Option<Arc<crate::redis::Redis>>,
+    #[cfg(feature = "redis")]
+    listener: std::sync::OnceLock<tokio::task::AbortHandle>,
+    l1: quick_cache::sync::Cache<CacheKey, Arc<Entry>, Admission>,
     tags: Mutex<Tags>,
     seq: AtomicU64,
     clock: Clock,
     sessions: SessionStore,
     idempotency: IdempotencyStore,
     rate_limits: RateLimitStore,
+}
+
+#[cfg(feature = "redis")]
+impl Drop for Inner {
+    fn drop(&mut self) {
+        if let Some(listener) = self.listener.get() {
+            listener.abort();
+        }
+    }
 }
 
 impl fmt::Debug for Cache {
@@ -100,7 +126,15 @@ impl Cache {
     /// An in-process cache of `capacity` entries reading `clock`.
     pub fn in_memory_with(capacity: usize, clock: Clock) -> Self {
         Cache(Arc::new(Inner {
-            l1: quick_cache::sync::Cache::new(capacity.max(1)),
+            #[cfg(feature = "redis")]
+            redis: None,
+            #[cfg(feature = "redis")]
+            listener: Default::default(),
+            l1: quick_cache::sync::Cache::with_weighter(
+                capacity.max(1),
+                capacity.max(1) as u64,
+                Admission,
+            ),
             tags: Mutex::new(Tags::default()),
             seq: AtomicU64::new(0),
             sessions: SessionStore::new(clock.clone()),
@@ -108,6 +142,88 @@ impl Cache {
             rate_limits: RateLimitStore::new(clock.clone()),
             clock,
         }))
+    }
+
+    /// Connects independent replicas to one Redis/Valkey namespace.
+    #[cfg(feature = "redis")]
+    pub async fn tiered(url: &str, namespace: &str) -> HyveResult<Self> {
+        let remote = crate::redis::Redis::connect(url, namespace).await?;
+        let mut cache = Self::in_memory();
+        Arc::get_mut(&mut cache.0).expect("new cache").redis = Some(remote.clone());
+        let weak = Arc::downgrade(&cache.0);
+        let task = remote
+            .subscribe(move |message| {
+                if let Some(inner) = weak.upgrade() {
+                    let cache = Cache(inner);
+                    match message.and_then(|m| m.split_once(':')) {
+                        Some(("key", k)) => {
+                            cache.0.l1.remove(&CacheKey::encoded(k));
+                        }
+                        Some(("tag", t)) => cache.mark_tag(Tag::encoded(t)),
+                        _ => cache.0.l1.clear(),
+                    }
+                }
+            })
+            .await?;
+        cache.0.listener.set(task).expect("new listener");
+        Ok(cache)
+    }
+
+    #[cfg(feature = "redis")]
+    pub(crate) fn redis(&self) -> Option<&Arc<crate::redis::Redis>> {
+        self.0.redis.as_ref()
+    }
+
+    /// Whether sessions and other guard state are authoritative on this process.
+    pub fn is_local(&self) -> bool {
+        #[cfg(feature = "redis")]
+        {
+            self.redis().is_none()
+        }
+        #[cfg(not(feature = "redis"))]
+        {
+            true
+        }
+    }
+
+    /// Constructs the app's cache from its explicit runtime configuration.
+    /// Set `HYPERISH_ORBIC_CACHE_URL` and `HYPERISH_ORBIC_CACHE_NAMESPACE`
+    /// for shared state. Multiple replicas require a shared store.
+    pub async fn from_env() -> HyveResult<Self> {
+        let replicas = std::env::var("HYPERISH_ORBIC_REPLICAS")
+            .map_or(Ok(1), |v| {
+                v.parse::<std::num::NonZeroU32>().map(|v| v.get())
+            })
+            .map_err(|_| HyveError::internal("HYPERISH_ORBIC_REPLICAS must be positive"))?;
+        let Some(url) = std::env::var_os("HYPERISH_ORBIC_CACHE_URL") else {
+            if replicas > 1 {
+                return Err(HyveError::internal(
+                    "multiple replicas require HYPERISH_ORBIC_CACHE_URL",
+                ));
+            }
+            return Ok(Self::in_memory());
+        };
+        #[cfg(feature = "redis")]
+        {
+            let namespace = std::env::var("HYPERISH_ORBIC_CACHE_NAMESPACE").map_err(|_| {
+                HyveError::internal(
+                    "set HYPERISH_ORBIC_CACHE_NAMESPACE for the application's shared keys",
+                )
+            })?;
+            Self::tiered(
+                url.to_str()
+                    .ok_or_else(|| HyveError::internal("invalid shared cache URL"))?,
+                &namespace,
+            )
+            .await
+        }
+        #[cfg(not(feature = "redis"))]
+        {
+            let _ = url;
+            Err(HyveError::internal(
+                "enable the orbic cache-redis feature to use HYPERISH_ORBIC_CACHE_URL",
+            ))
+        }
     }
 
     /// The cached value for `key`, or the result of `init`. Concurrent misses
@@ -125,36 +241,88 @@ impl Cache {
         Fut: Future<Output = HyveResult<T>>,
     {
         let inner = &self.0;
-        loop {
-            match inner.l1.get_value_or_guard_async(&key).await {
-                Ok(entry) => {
-                    if self.is_fresh(&entry) {
+        let guard = loop {
+            let entry = match inner.l1.get_value_or_guard_async(&key).await {
+                Ok(entry) => entry,
+                Err(guard) => break guard,
+            };
+            if self.is_fresh(&entry) {
+                #[cfg(feature = "redis")]
+                if let (Some(remote), Some(revision)) = (self.redis(), &entry.revision) {
+                    if remote.current(&key, revision).await? {
                         return read(&key, &entry);
                     }
-                    inner.l1.remove_if(&key, |e| Arc::ptr_eq(e, &entry));
+                } else {
+                    return read(&key, &entry);
                 }
-                Err(guard) => {
-                    let started = inner.clock.now();
-                    let loaded = inner.seq.load(Ordering::SeqCst);
-                    self.note_ttl(opts.ttl);
-                    let value = init().await?;
-                    if !opts.ttl.is_zero() {
-                        let _ = guard.insert(Arc::new(Entry {
-                            value: Arc::new(value.clone()),
-                            type_name: type_name::<T>(),
-                            expires: started + opts.ttl,
-                            loaded,
-                            tags: opts.tags.into(),
-                        }));
+                #[cfg(not(feature = "redis"))]
+                return read(&key, &entry);
+            }
+            // Acquire the next load atomically. A different caller may have already
+            // installed a replacement while this caller was checking its revision.
+            match inner
+                .l1
+                .entry_async(&key, |_, current| {
+                    if Arc::ptr_eq(current, &entry) {
+                        EntryAction::ReplaceWithGuard
+                    } else {
+                        EntryAction::Retain(())
                     }
-                    return Ok(value);
+                })
+                .await
+            {
+                EntryResult::Replaced(guard, _) | EntryResult::Vacant(guard) => break guard,
+                EntryResult::Retained(()) => continue,
+                EntryResult::Removed(..) | EntryResult::Timeout => {
+                    unreachable!("async replace or retain")
                 }
             }
+        };
+        let started = inner.clock.now();
+        let generation = self.start_load(&opts);
+        #[cfg(feature = "redis")]
+        if let Some(remote) = self.redis() {
+            let crate::redis::Loaded {
+                value,
+                expires,
+                revision,
+            } = remote.load(&key, opts.ttl, &opts.tags, init).await?;
+            if expires.is_none_or(|end| end > inner.clock.now()) {
+                let _ = guard.insert(Arc::new(Entry {
+                    revision: expires.map(|_| revision),
+                    value: Arc::new(value.clone()),
+                    type_name: type_name::<T>(),
+                    expires,
+                    validated: AtomicU64::new(generation),
+                    tags: opts.tags.into(),
+                }));
+            }
+            return Ok(value);
         }
+        let value = init().await?;
+        let _ = guard.insert(Arc::new(Entry {
+            #[cfg(feature = "redis")]
+            revision: None,
+            value: Arc::new(value.clone()),
+            type_name: type_name::<T>(),
+            expires: (!opts.ttl.is_zero()).then(|| started + opts.ttl),
+            validated: AtomicU64::new(generation),
+            tags: opts.tags.into(),
+        }));
+        Ok(value)
     }
 
     /// Drops every entry tagged `tag`, including values still loading.
     pub async fn invalidate_tag(&self, tag: Tag) -> HyveResult<()> {
+        #[cfg(feature = "redis")]
+        if let Some(remote) = self.redis() {
+            remote.invalidate_tag(&tag).await?;
+        }
+        self.mark_tag(tag);
+        Ok(())
+    }
+
+    fn mark_tag(&self, tag: Tag) {
         let inner = &self.0;
         let now = inner.clock.now();
         let mut tags = inner.tags.lock().unwrap_or_else(PoisonError::into_inner);
@@ -167,26 +335,29 @@ impl Cache {
             tags.invalidated.retain(|_, (_, at)| *at + keep > now);
             tags.prune_at = tags.invalidated.len() * 2;
         }
-        Ok(())
     }
 
     /// Drops the entry for `key`.
     pub async fn invalidate(&self, key: &CacheKey) -> HyveResult<()> {
+        #[cfg(feature = "redis")]
+        if let Some(remote) = self.redis() {
+            remote.invalidate(key).await?;
+        }
         self.0.l1.remove(key);
         Ok(())
     }
 
-    /// Session and refresh records (`orbic-auth`).
+    /// In-process session records. Request guards use the authoritative async operations.
     pub fn sessions(&self) -> &SessionStore {
         &self.0.sessions
     }
 
-    /// `Idempotency-Key` outcomes (the pipeline's gate).
+    /// In-process idempotency records. Use `begin_request` for replicated applications.
     pub fn idempotency(&self) -> &IdempotencyStore {
         &self.0.idempotency
     }
 
-    /// `RateLimit` counters.
+    /// In-process counters. Use `count_request` for replicated applications.
     pub fn rate_limits(&self) -> &RateLimitStore {
         &self.0.rate_limits
     }
@@ -196,21 +367,44 @@ impl Cache {
         &self.0.clock
     }
 
-    fn note_ttl(&self, ttl: Duration) {
+    fn start_load(&self, opts: &CacheOpts) -> u64 {
+        if opts.tags.is_empty() {
+            return 0;
+        }
+        // Publish the retention window and take its generation under the same lock.
+        // An invalidation between these operations could otherwise be pruned too early.
         let mut tags = self.0.tags.lock().unwrap_or_else(PoisonError::into_inner);
-        tags.max_ttl = tags.max_ttl.max(ttl);
+        tags.max_ttl = tags.max_ttl.max(opts.ttl);
+        self.0.seq.load(Ordering::Acquire)
     }
 
-    fn is_fresh(&self, e: &Entry) -> bool {
-        if e.expires <= self.0.clock.now() {
+    fn is_fresh(&self, entry: &Entry) -> bool {
+        if entry.expires.is_some_and(|end| end <= self.0.clock.now()) {
+            return false;
+        }
+        if entry.tags.is_empty() {
+            return true;
+        }
+        let validated = entry.validated.load(Ordering::Acquire);
+        if self.0.seq.load(Ordering::Acquire) == validated {
+            return true;
+        }
+        // An in-flight-only load has no retention window for invalidation history.
+        if entry.expires.is_none() {
             return false;
         }
         let tags = self.0.tags.lock().unwrap_or_else(PoisonError::into_inner);
-        e.tags.iter().all(|t| {
+        if entry.tags.iter().any(|t| {
             tags.invalidated
                 .get(t)
-                .is_none_or(|(seq, _)| *seq <= e.loaded)
-        })
+                .is_some_and(|(seq, _)| *seq > validated)
+        }) {
+            return false;
+        }
+        entry
+            .validated
+            .store(self.0.seq.load(Ordering::Acquire), Ordering::Release);
+        true
     }
 }
 

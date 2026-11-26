@@ -34,6 +34,10 @@
 //! ```
 
 mod app;
+#[cfg(feature = "jobs")]
+mod schedule;
+#[cfg(feature = "jobs")]
+pub use schedule::{Schedule, ScheduledTask};
 mod component;
 mod extract;
 mod guard;
@@ -42,7 +46,7 @@ mod idempotency;
 mod rate_limit;
 mod request;
 
-pub use app::{AssemblyError, Idle, OrbicApp, Pipeline, RouteInfo};
+pub use app::{AdapterRequest, AssemblyError, Idle, OrbicApp, Pipeline, RouteInfo};
 pub use component::{BackendComponent, arg_json_name, component};
 pub use extract::{
     Extract, Params, ParamsFrom, Parts, RouteShape, decode_body, from_params, parse_query,
@@ -51,6 +55,6 @@ pub use guard::{Guard, GuardCtx, GuardShape};
 pub use handler::{Handler, encode};
 pub use rate_limit::RateLimit;
 pub use request::{
-    Body, Credential, CredentialSlot, CredentialUpdate, Payload, Principal, Rail, RateLimitInfo,
-    Request, RequestMeta, Response, ResponseMeta,
+    Body, Credential, CredentialSlot, CredentialUpdate, DeliverySignature, Payload, Principal,
+    Rail, RateLimitInfo, Request, RequestMeta, Response, ResponseMeta,
 };

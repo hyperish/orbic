@@ -7,22 +7,71 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(not(feature = "serge"))]
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use hyve::HyveError;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
-use crate::{HttpApp, too_large};
+use crate::HttpApp;
 
 /// After the grace period, cancelled requests get this long to unwind
 /// before their connections are dropped.
 const CANCEL_GRACE: Duration = Duration::from_secs(1);
+
+#[cfg(not(feature = "serge"))]
+type SocketBody = http_body_util::Full<Bytes>;
+#[cfg(feature = "serge")]
+type SocketBody = orbic_adapter_serge::SiteBody;
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for tokio::net::TcpListener {}
+    #[cfg(all(feature = "ipc", any(unix, windows)))]
+    impl Sealed for hyve::ipc::Listener {}
+}
+
+/// A listener supported by the HTTP adapter and its graceful shutdown loop.
+pub trait ServerListener: sealed::Sealed + Send {
+    /// An established byte stream.
+    type Stream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static;
+    /// Accepts and identifies the next peer.
+    fn accept_peer(
+        &mut self,
+    ) -> impl Future<Output = io::Result<(Self::Stream, SocketAddr)>> + Send;
+    /// Whether this listener's transport permits plaintext.
+    fn local_plaintext(&self) -> io::Result<bool>;
+    /// Local RPC peers cannot delegate a forwarded proxy identity.
+    fn is_ipc(&self) -> bool {
+        false
+    }
+}
+impl ServerListener for TcpListener {
+    type Stream = tokio::net::TcpStream;
+    async fn accept_peer(&mut self) -> io::Result<(Self::Stream, SocketAddr)> {
+        self.accept().await
+    }
+    fn local_plaintext(&self) -> io::Result<bool> {
+        Ok(self.local_addr()?.ip().is_loopback())
+    }
+}
+#[cfg(all(feature = "ipc", any(unix, windows)))]
+impl ServerListener for hyve::ipc::Listener {
+    type Stream = hyve::ipc::ServerStream;
+    async fn accept_peer(&mut self) -> io::Result<(Self::Stream, SocketAddr)> {
+        Ok((self.accept().await?, SocketAddr::from(([127, 0, 0, 1], 0))))
+    }
+    fn local_plaintext(&self) -> io::Result<bool> {
+        Ok(true)
+    }
+    fn is_ipc(&self) -> bool {
+        true
+    }
+}
 
 impl HttpApp {
     /// Serves HTTP/1.1 on `listener` until `shutdown` resolves, then drains:
@@ -34,11 +83,14 @@ impl HttpApp {
     /// Each request runs inside its connection's task, so a client that
     /// disconnects cancels its request.
     pub async fn serve(
-        self,
-        listener: TcpListener,
+        mut self,
+        mut listener: impl ServerListener,
         shutdown: impl Future<Output = ()>,
     ) -> io::Result<()> {
-        let loopback = listener.local_addr()?.ip().is_loopback();
+        let loopback = listener.local_plaintext()?;
+        if listener.is_ipc() {
+            self.settings.trusted.clear();
+        }
         let app = Arc::new(if loopback {
             self.allow_plaintext(true)
         } else {
@@ -51,7 +103,7 @@ impl HttpApp {
             tokio::select! {
                 () = &mut shutdown => break,
                 Some(_) = connections.join_next(), if !connections.is_empty() => {}
-                accepted = listener.accept() => {
+                accepted = listener.accept_peer() => {
                     let Ok((stream, peer)) = accepted else {
                         // Out of descriptors and the like: back off, keep serving.
                         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -103,25 +155,18 @@ impl HttpApp {
         &self,
         req: hyper::Request<Incoming>,
         peer: SocketAddr,
-    ) -> hyper::Response<Full<Bytes>> {
+    ) -> hyper::Response<SocketBody> {
         let (parts, body) = req.into_parts();
-        let max = self.settings.max_body;
-        let declared_too_large = parts
-            .headers
-            .get(http::header::CONTENT_LENGTH)
-            .and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
-            .is_some_and(|n| n > max as u64);
-        let body = if declared_too_large {
-            Err(too_large(max))
-        } else {
-            match Limited::new(body, max).collect().await {
-                Ok(collected) => Ok(collected.to_bytes()),
-                Err(e) if e.downcast_ref::<LengthLimitError>().is_some() => Err(too_large(max)),
-                Err(_) => Err(HyveError::invalid_request(
-                    "the request body could not be read",
-                )),
-            }
-        };
-        self.answer(&parts, body, peer).await.map(Full::new)
+        let body = crate::body::collect(body, self.settings.max_body).await;
+        #[cfg(feature = "serge")]
+        {
+            self.socket_answer(&parts, body, peer).await
+        }
+        #[cfg(not(feature = "serge"))]
+        {
+            self.answer(&parts, body, peer)
+                .await
+                .map(http_body_util::Full::new)
+        }
     }
 }

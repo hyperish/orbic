@@ -13,6 +13,8 @@ use crate::request::{Body, Rail, RequestMeta};
 
 /// What an extractor can read from a request.
 pub struct Parts {
+    /// The routed request path without its query string.
+    pub path: String,
     /// The request scope: values provided by enclosing components and by
     /// guards (`CurrentUser`).
     pub scope: Scope,

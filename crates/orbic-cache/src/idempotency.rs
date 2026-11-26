@@ -35,6 +35,7 @@ enum State {
 }
 
 struct Entry {
+    owner: hyve_core::Ulid,
     digest: u128,
     state: State,
 }
@@ -84,7 +85,7 @@ impl IdempotencyStore {
     /// Claims `key` for a request whose rail and body hash to `digest`.
     pub fn begin(&self, key: IdempotencyKey, digest: u128) -> Begin {
         let now = self.0.clock.now();
-        let mut g = self.0.map.lock(now);
+        let mut g = self.0.map.lock(&key, now);
         if let Some((e, _)) = g.live(&key, now) {
             return if e.digest != digest {
                 Begin::Mismatch
@@ -95,10 +96,12 @@ impl IdempotencyStore {
                 }
             };
         }
+        let owner = hyve_core::Ulid::new();
         g.map.insert(
             key.clone(),
             (
                 Entry {
+                    owner,
                     digest,
                     state: State::Running,
                 },
@@ -106,6 +109,7 @@ impl IdempotencyStore {
             ),
         );
         Begin::Started(Reservation {
+            owner,
             store: self.clone(),
             key: Some(key),
         })
@@ -114,6 +118,7 @@ impl IdempotencyStore {
 
 /// A claimed key; see [`Begin::Started`].
 pub struct Reservation {
+    owner: hyve_core::Ulid,
     store: IdempotencyStore,
     key: Option<IdempotencyKey>,
 }
@@ -124,8 +129,10 @@ impl Reservation {
         let key = self.key.take().expect("completed once");
         let inner = &self.store.0;
         let now = inner.clock.now();
-        let mut g = inner.map.lock(now);
-        if let Some((e, expires)) = g.map.get_mut(&key) {
+        let mut g = inner.map.lock(&key, now);
+        if let Some((e, expires)) = g.live(&key, now)
+            && e.owner == self.owner
+        {
             e.state = State::Done(outcome);
             *expires = now + IDEMPOTENCY_RETENTION;
         }
@@ -136,10 +143,10 @@ impl Drop for Reservation {
     fn drop(&mut self) {
         if let Some(key) = self.key.take() {
             let inner = &self.store.0;
-            let mut g = inner.map.lock(inner.clock.now());
+            let mut g = inner.map.lock(&key, inner.clock.now());
             if g.map
                 .get(&key)
-                .is_some_and(|(e, _)| matches!(e.state, State::Running))
+                .is_some_and(|(e, _)| e.owner == self.owner && matches!(e.state, State::Running))
             {
                 g.map.remove(&key);
             }
@@ -159,6 +166,18 @@ mod tests {
             path: "/x".into(),
             key: k.into(),
         }
+    }
+
+    #[test]
+    fn completing_after_expiry_does_not_restore_an_old_reply() {
+        let time = ManualClock::new();
+        let store = IdempotencyStore::new(time.clock());
+        let Begin::Started(owner) = store.begin(key("late"), 1) else {
+            panic!()
+        };
+        time.advance(IDEMPOTENCY_RETENTION);
+        owner.complete(Arc::new(9u32));
+        assert!(matches!(store.begin(key("late"), 1), Begin::Started(_)));
     }
 
     #[test]

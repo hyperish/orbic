@@ -1,7 +1,6 @@
 //! `RateLimit`: a guard counting requests per principal or client address
 //! (`docs/01-dx-and-dsl.md` §1, `RateLimit`의 키).
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use hyve_api::{BoxFuture, ContextNeed};
@@ -11,8 +10,6 @@ use orbic_cache::Cache;
 use crate::guard::{Guard, GuardCtx};
 use crate::request::{Principal, RateLimitInfo};
 
-static NEXT: AtomicU64 = AtomicU64::new(1);
-
 /// Allows `limit` requests per window to each principal (or, before
 /// authentication, each client address) across the routes of the component
 /// it wraps; more fail with `429 rate_limited` until the window resets.
@@ -20,7 +17,6 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 /// live in the app's `Cache`.
 #[derive(Debug)]
 pub struct RateLimit {
-    id: u64,
     limit: u32,
     window: Duration,
 }
@@ -37,11 +33,7 @@ impl RateLimit {
             !window.is_zero(),
             "RateLimit: the window must be longer than zero"
         );
-        RateLimit {
-            id: NEXT.fetch_add(1, Ordering::Relaxed),
-            limit,
-            window,
-        }
+        RateLimit { limit, window }
     }
 
     /// `limit` requests per second.
@@ -81,8 +73,8 @@ impl Guard for RateLimit {
                 (None, None) => "addr:unknown".to_owned(),
             };
             let d = cache
-                .rate_limits()
-                .hit(self.id, &subject, self.limit, self.window);
+                .count_request(cx.guard_key, &subject, self.limit, self.window)
+                .await?;
             let reset_secs = d.reset.as_secs() + u64::from(d.reset.subsec_nanos() > 0);
             let info = RateLimitInfo {
                 limit: d.limit,

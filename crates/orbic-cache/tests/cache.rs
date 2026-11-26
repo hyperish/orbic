@@ -60,6 +60,25 @@ fn concurrent_misses_load_once() {
 }
 
 #[test]
+fn zero_ttl_publishes_only_to_existing_waiters() {
+    let cache = Cache::in_memory();
+    let open = Arc::new(AtomicBool::new(false));
+    let zero = || CacheOpts::ttl(Duration::ZERO);
+    let mut first = pin!(cache.get_or_try_init(key("one"), zero(), || async {
+        gate(&open).await;
+        Ok(7u32)
+    }));
+    let mut waiter = pin!(cache.get_or_try_init(key("one"), zero(), || async { Ok(8u32) }));
+    assert!(poll(first.as_mut()).is_pending());
+    assert!(poll(waiter.as_mut()).is_pending());
+    open.store(true, Ordering::Release);
+    assert_eq!(poll(first.as_mut()), Poll::Ready(Ok(7)));
+    let mut later = pin!(cache.get_or_try_init(key("one"), zero(), || async { Ok(9u32) }));
+    assert_eq!(poll(later.as_mut()), Poll::Ready(Ok(9)));
+    assert_eq!(poll(waiter.as_mut()), Poll::Ready(Ok(7)));
+}
+
+#[test]
 fn a_waiter_takes_over_when_the_loader_goes_away() {
     let cache = Cache::in_memory();
     let never = Arc::new(AtomicBool::new(false));

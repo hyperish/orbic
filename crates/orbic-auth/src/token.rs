@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /// A new credential value.
-pub(crate) fn new() -> Result<String, HyveError> {
+pub fn new() -> Result<String, HyveError> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|e| {
         HyveError::infra(
@@ -35,7 +35,7 @@ fn base64url(bytes: &[u8]) -> String {
 }
 
 /// The store key of a credential: a namespace and the hex SHA-256.
-pub(crate) fn key(namespace: &str, token: &str) -> String {
+pub fn key(namespace: &str, token: &str) -> String {
     let digest = Sha256::digest(token.as_bytes());
     let mut out = String::with_capacity(namespace.len() + 65);
     out.push_str(namespace);

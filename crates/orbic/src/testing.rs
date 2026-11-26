@@ -81,6 +81,23 @@ impl TestClient {
         }
     }
 
+    /// Authenticates the test user against the configured store, including Redis.
+    pub async fn as_user_async<U: SessionUser>(&self, user: U) -> HyveResult<TestClient> {
+        let pipeline = self.pipeline();
+        let cache = pipeline
+            .provided::<Cache>()
+            .ok_or_else(|| HyveError::internal("provide Cache at the root"))?;
+        let config = pipeline
+            .provided::<AuthConfig>()
+            .map(|c| *c)
+            .unwrap_or_default();
+        let issued = orbic_auth::issue_async(&cache, &config, &user, Client::Bearer).await?;
+        Ok(TestClient {
+            bearer: Some(issued.session),
+            ..self.clone()
+        })
+    }
+
     /// The in-process transport into this app, with this client's session.
     pub fn in_process(&self) -> InProcess {
         let t = InProcess::new(self.pipeline().clone());

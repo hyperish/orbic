@@ -47,6 +47,8 @@ type ProvideFn = Box<dyn FnOnce(&Scope) + Send>;
 #[must_use = "a component does nothing until it is mounted into an `OrbicApp`"]
 #[derive(Default)]
 pub struct BackendComponent {
+    #[cfg(feature = "jobs")]
+    pub(crate) timers: Vec<crate::schedule::Declaration>,
     pub(crate) provides: Vec<(ContextNeed, ProvideFn)>,
     pub(crate) guards: Vec<Arc<dyn Guard>>,
     pub(crate) routes: Vec<RouteDef>,

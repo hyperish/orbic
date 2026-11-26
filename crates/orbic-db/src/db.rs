@@ -308,8 +308,7 @@ impl Exec {
             .zip(M::TYPES)
             .map(|(name, (ty, _))| Want { name, ty: *ty })
             .collect();
-        let rows = self.rows(sql, binds, &want).await?;
-        rows.into_iter().map(M::from_values).collect()
+        self.rows_with(sql, binds, &want, M::from_row).await
     }
 
     /// Rows as values in `want` order.
@@ -319,6 +318,17 @@ impl Exec {
         binds: &[Bind],
         want: &[Want<'_>],
     ) -> HyveResult<Vec<Vec<DbValue>>> {
+        self.rows_with(sql, binds, want, |fields| fields.collect())
+            .await
+    }
+
+    async fn rows_with<M>(
+        &self,
+        sql: Text,
+        binds: &[Bind],
+        want: &[Want<'_>],
+        map: impl Fn(&mut dyn Iterator<Item = HyveResult<DbValue>>) -> HyveResult<M>,
+    ) -> HyveResult<Vec<M>> {
         match self {
             Exec::Db(db) => match &db.pool {
                 Pool::Sqlite(p) => {
@@ -326,16 +336,14 @@ impl Exec {
                         .fetch_all(p)
                         .await
                         .map_err(driver::error)?;
-                    rows.iter()
-                        .map(|r| driver::sqlite::decode(r, want))
-                        .collect()
+                    driver::decode_rows(&rows, want, driver::sqlite::field, map)
                 }
                 Pool::Postgres(p) => {
                     let rows = driver::pg::query(&sql, binds)
                         .fetch_all(p)
                         .await
                         .map_err(driver::error)?;
-                    rows.iter().map(|r| driver::pg::decode(r, want)).collect()
+                    driver::decode_rows(&rows, want, driver::pg::field, map)
                 }
             },
             Exec::Tx(tx) => {
@@ -346,16 +354,14 @@ impl Exec {
                             .fetch_all(&mut **t)
                             .await
                             .map_err(driver::error)?;
-                        rows.iter()
-                            .map(|r| driver::sqlite::decode(r, want))
-                            .collect()
+                        driver::decode_rows(&rows, want, driver::sqlite::field, map)
                     }
                     TxConn::Postgres(t) => {
                         let rows = driver::pg::query(&sql, binds)
                             .fetch_all(&mut **t)
                             .await
                             .map_err(driver::error)?;
-                        rows.iter().map(|r| driver::pg::decode(r, want)).collect()
+                        driver::decode_rows(&rows, want, driver::pg::field, map)
                     }
                 }
             }
@@ -415,4 +421,35 @@ pub(crate) fn find_workspace(start: &Path) -> Option<std::path::PathBuf> {
         .ancestors()
         .find(|d| d.join("hyve.toml").is_file())
         .map(Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod row_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn decoded_projection_follows_names_and_keeps_the_first_duplicate() {
+        crate::projection!(Sample, "samples", id: i32, label: String, missing: Option<i32>);
+        let exec = Db::empty_in_memory().await.exec();
+        let sql = Text::Static(
+            "SELECT NULL AS missing, 'one' AS label, 7 AS id, 9 AS id UNION ALL SELECT 3, 'two', 8, 10",
+        );
+        let rows = exec.fetch::<Sample>(sql, &[]).await.unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|r| (r.id, r.label.as_str(), r.missing))
+                .collect::<Vec<_>>(),
+            [(7, "one", None), (8, "two", Some(3))]
+        );
+        let error = exec
+            .fetch::<Sample>(Text::Static("SELECT 1 AS id, NULL AS missing"), &[])
+            .await
+            .err()
+            .unwrap();
+        assert!(
+            error
+                .message()
+                .contains("column `label`: not in the result")
+        );
+    }
 }

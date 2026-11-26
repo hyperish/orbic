@@ -18,9 +18,11 @@
 //!   retryable), `RateLimit-*`, `Allow` (405), `Set-Cookie`, security
 //!   headers, CORS for allowed origins.
 
+mod body;
 mod config;
 mod metrics;
 mod server;
+pub use server::ServerListener;
 
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
@@ -37,6 +39,7 @@ use hyve::serde::{Binary as _, to_json};
 use hyve::{ErrorKind, HyveError, RequestId, Value};
 use orbic_core::{
     Body, Credential, CredentialUpdate, Payload, Pipeline, Rail, Request, RequestMeta, Response,
+    ResponseMeta,
 };
 
 use crate::config::Cidr;
@@ -246,7 +249,86 @@ impl HttpApp {
         peer: SocketAddr,
     ) -> http::Response<Bytes> {
         let (parts, body) = request.into_parts();
+        #[cfg(feature = "serge")]
+        {
+            use http_body_util::BodyExt;
+            let response = self.socket_answer(&parts, Ok(body), peer).await;
+            let (parts, body) = response.into_parts();
+            let id = header_str(&parts.headers, HEADER_REQUEST_ID)
+                .and_then(|v| RequestId::parse(v).ok())
+                .unwrap_or_default();
+            match body.collect().await {
+                Ok(body) => http::Response::from_parts(parts, body.to_bytes()),
+                Err(e) => finish(error(e.to_public(), &id), &id, None),
+            }
+        }
+        #[cfg(not(feature = "serge"))]
         self.answer(&parts, Ok(body), peer).await
+    }
+
+    #[cfg(feature = "serge")]
+    pub(crate) async fn socket_answer(
+        &self,
+        parts: &http::request::Parts,
+        body: Result<Bytes, HyveError>,
+        peer: SocketAddr,
+    ) -> http::Response<orbic_adapter_serge::SiteBody> {
+        use orbic_adapter_serge::{SergeHost, full};
+        let path = parts.uri.path();
+        if let Some(site) = self.pipeline.provided::<SergeHost>()
+            && site.handles(path)
+            && !self.pipeline.owns_path(path)
+            && !self
+                .documents
+                .iter()
+                .any(|d| path == d.0 || path.strip_prefix(&d.0).is_some_and(|p| p.starts_with('/')))
+        {
+            let headers = &parts.headers;
+            let id = header_str(headers, HEADER_REQUEST_ID)
+                .and_then(|v| RequestId::parse(v).ok())
+                .unwrap_or_default();
+            let peer = peer.ip().to_canonical();
+            let mut response_meta = ResponseMeta::default();
+            let result = if !self.secure(headers, peer) {
+                Err(https_required())
+            } else if body
+                .as_ref()
+                .is_ok_and(|b| b.len() > self.settings.max_body)
+            {
+                Err(crate::too_large(self.settings.max_body))
+            } else if let Err(e) = body {
+                Err(e)
+            } else {
+                let addr = if self.settings.trusted.iter().any(|c| c.contains(peer)) {
+                    forwarded_for(headers, &self.settings.trusted).unwrap_or(peer)
+                } else {
+                    peer
+                };
+                let meta = RequestMeta {
+                    request_id: Some(id.clone()),
+                    trace_parent: trace_parent(headers),
+                    client_addr: Some(addr),
+                    credential: self.credential(headers),
+                    ..RequestMeta::default()
+                };
+                site.answer(&self.pipeline, parts, &meta, &id, &mut response_meta)
+                    .await
+            };
+            let mut response = match result {
+                Ok(response) => response,
+                Err(e) => {
+                    let response = error_body(&e.to_public(), false, response_meta.retry_after);
+                    if parts.method == HttpMethod::HEAD {
+                        response.map(|_| full(Bytes::new()))
+                    } else {
+                        response.map(full)
+                    }
+                }
+            };
+            self.apply_response_meta(response.headers_mut(), response_meta);
+            return finish(response, &id, self.allowed_origin(headers));
+        }
+        self.answer(parts, body, peer).await.map(full)
     }
 
     pub(crate) async fn answer(
@@ -387,6 +469,8 @@ impl HttpApp {
             },
             meta: RequestMeta {
                 request_id: Some(id.clone()),
+                trace_parent: trace_parent(headers),
+                delivery_signature: delivery_signature(headers),
                 idempotency_key: headers
                     .get(&IDEMPOTENCY_KEY)
                     .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned()),
@@ -461,14 +545,18 @@ impl HttpApp {
             ),
             Err(e) => error_body(&e, fast, response.meta.retry_after),
         };
-        let h = out.headers_mut();
-        if let Some(rl) = response.meta.rate_limit {
+        self.apply_response_meta(out.headers_mut(), response.meta);
+        out
+    }
+
+    fn apply_response_meta(&self, h: &mut HeaderMap, meta: ResponseMeta) {
+        if let Some(rl) = meta.rate_limit {
             h.insert(RATE_LIMIT_LIMIT, rl.limit.into());
             h.insert(RATE_LIMIT_REMAINING, rl.remaining.into());
             h.insert(RATE_LIMIT_RESET, rl.reset_secs.into());
         }
         let name = &self.settings.cookie;
-        let cookie = match response.meta.credential_update {
+        let cookie = match meta.credential_update {
             Some(CredentialUpdate::SetSession { token, .. }) => Some(format!(
                 "{name}={token}; Path=/; HttpOnly; Secure; SameSite=Lax"
             )),
@@ -480,7 +568,6 @@ impl HttpApp {
         if let Some(c) = cookie.and_then(|c| HeaderValue::from_str(&c).ok()) {
             h.append(header::SET_COOKIE, c);
         }
-        out
     }
 }
 
@@ -565,14 +652,14 @@ fn error_body(e: &HyveError, fast: bool, retry_after: Option<u64>) -> http::Resp
 }
 
 /// Headers every answer carries.
-fn finish(
-    mut r: http::Response<Bytes>,
+fn finish<B>(
+    mut r: http::Response<B>,
     id: &RequestId,
     origin: Option<HeaderValue>,
-) -> http::Response<Bytes> {
+) -> http::Response<B> {
     let h = r.headers_mut();
     for (name, value) in SECURITY_HEADERS {
-        h.insert(name, HeaderValue::from_static(value));
+        h.entry(name).or_insert(HeaderValue::from_static(value));
     }
     if let Ok(v) = HeaderValue::from_str(id.as_str()) {
         h.insert(HeaderName::from_static(HEADER_REQUEST_ID), v);
@@ -621,6 +708,23 @@ fn api_method(m: &HttpMethod) -> Option<Method> {
 }
 
 type RailChoice = (Rail, Option<(String, u64)>);
+
+fn delivery_signature(headers: &HeaderMap) -> Option<orbic_core::DeliverySignature> {
+    let one = |key: &str| {
+        let mut all = headers.get_all(key).iter();
+        let value = all.next()?.to_str().ok()?;
+        all.next().is_none().then(|| value.to_owned())
+    };
+    Some(orbic_core::DeliverySignature {
+        id: one("webhook-id")?,
+        timestamp: one("webhook-timestamp")?,
+        signatures: one("webhook-signature")?,
+    })
+}
+
+fn trace_parent(headers: &HeaderMap) -> Option<hyve::trace::TraceParent> {
+    hyve::trace::TraceParent::parse(headers.get("traceparent")?.to_str().ok()?)
+}
 
 fn rail(headers: &HeaderMap, empty_body: bool) -> Result<RailChoice, HyveError> {
     let media = headers.get(header::CONTENT_TYPE).map(|v| {

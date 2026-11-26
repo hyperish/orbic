@@ -1,5 +1,5 @@
 //! `[orbic]` in `hyve.toml` (`docs/01-dx-and-dsl.md` §4, 설정과 위치): one
-//! schema for the app, `hyve-orbic codegen` and `hyve-orbic preview`, since
+//! schema for the app, `hyve-orbic codegen` and `hyve-orbic dev`, since
 //! the loader refuses keys a table's schema does not have. Each field can
 //! also come from `HYPERISH_ORBIC_<FIELD>` (and `.env`), which wins over
 //! `hyve.toml`.
@@ -9,7 +9,7 @@ use hyve::prelude::*;
 
 use crate::db::Db;
 
-/// The variable for `database_url`. `hyve-orbic preview` sets it to its
+/// The variable for `database_url`. `hyve-orbic dev` sets it to its
 /// local database for the servers it runs.
 pub const DATABASE_URL_ENV: &str = "HYPERISH_ORBIC_DATABASE_URL";
 
@@ -49,7 +49,7 @@ impl OrbicConfig {
         match self.database_url.as_deref() {
             Some(url) => Db::connect(url).await,
             None => Err(HyveError::internal(format!(
-                "no database configured: set `[orbic] database_url` in hyve.toml or {DATABASE_URL_ENV} (`hyve preview` sets it to a local database)"
+                "no database configured: set `[orbic] database_url` in hyve.toml or {DATABASE_URL_ENV} (`hyve dev` sets it to a local database)"
             ))),
         }
     }
@@ -57,7 +57,7 @@ impl OrbicConfig {
 
 impl Db {
     /// Connects to the configured database: `[orbic] database_url`, or
-    /// `HYPERISH_ORBIC_DATABASE_URL`, which `hyve preview` sets to a local
+    /// `HYPERISH_ORBIC_DATABASE_URL`, which `hyve dev` sets to a local
     /// database with the workspace's migrations applied.
     pub async fn from_config() -> HyveResult<Db> {
         OrbicConfig::load()?.connect().await

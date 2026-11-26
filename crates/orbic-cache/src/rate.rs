@@ -1,7 +1,7 @@
 //! Fixed-window counters behind the `RateLimit` guard.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::clock::Clock;
 use crate::ttl::TtlMap;
@@ -11,7 +11,7 @@ use crate::ttl::TtlMap;
 pub struct RateLimitStore(Arc<Inner>);
 
 struct Inner {
-    map: TtlMap<(u64, String), (Instant, u32)>,
+    map: TtlMap<(String, String), u32>,
     clock: Clock,
 }
 
@@ -39,14 +39,23 @@ impl RateLimitStore {
     /// Counts a request of `subject` against the limiter `scope`. A window
     /// starts at the subject's first request and resets after `window`.
     pub fn hit(&self, scope: u64, subject: &str, limit: u32, window: Duration) -> RateDecision {
+        self.count(&scope.to_string(), subject, limit, window)
+    }
+
+    pub(crate) fn count(
+        &self,
+        scope: &str,
+        subject: &str,
+        limit: u32,
+        window: Duration,
+    ) -> RateDecision {
         let now = self.0.clock.now();
-        let mut g = self.0.map.lock(now);
-        let key = (scope, subject.to_owned());
-        let entry = match g.live(&key, now) {
+        let key = (scope.to_owned(), subject.to_owned());
+        let mut g = self.0.map.lock(&key, now);
+        let (count, expires) = match g.live(&key, now) {
             Some(e) => e,
-            None => g.map.entry(key).or_insert(((now, 0), now + window)),
+            None => g.map.entry(key).or_insert((0, now + window)),
         };
-        let (start, count) = &mut entry.0;
         let allowed = *count < limit;
         if allowed {
             *count += 1;
@@ -54,8 +63,8 @@ impl RateLimitStore {
         RateDecision {
             allowed,
             limit,
-            remaining: limit - *count,
-            reset: (*start + window).saturating_duration_since(now),
+            remaining: limit.saturating_sub(*count),
+            reset: expires.saturating_duration_since(now),
         }
     }
 }
@@ -64,6 +73,22 @@ impl RateLimitStore {
 mod tests {
     use super::*;
     use crate::clock::ManualClock;
+
+    #[test]
+    fn lowering_a_limit_preserves_the_existing_deadline_and_count() {
+        let time = ManualClock::new();
+        let store = RateLimitStore::new(time.clock());
+        let window = Duration::from_secs(60);
+        for _ in 0..3 {
+            assert!(store.hit(1, "u", 3, window).allowed);
+        }
+        time.advance(Duration::from_secs(10));
+        let denied = store.hit(1, "u", 1, Duration::from_secs(5));
+        assert_eq!(
+            (denied.allowed, denied.remaining, denied.reset),
+            (false, 0, Duration::from_secs(50))
+        );
+    }
 
     #[test]
     fn windows_count_and_reset() {

@@ -35,6 +35,32 @@ struct State {
 }
 
 impl State {
+    fn insert(&mut self, key: String, family: &str, value: Vec<u8>, expires: Instant) {
+        self.unlink(&key);
+        self.families
+            .entry(family.to_owned())
+            .or_default()
+            .insert(key.clone());
+        self.records.insert(
+            key,
+            Record {
+                value,
+                family: family.to_owned(),
+                expires,
+            },
+        );
+    }
+
+    fn revoke(&mut self, family: &str, now: Instant) -> usize {
+        self.families
+            .remove(family)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|key| self.records.remove(&key))
+            .filter(|r| r.expires > now)
+            .count()
+    }
+
     fn sweep(&mut self, now: Instant) {
         if self.records.len() < self.sweep_at.max(MIN_SWEEP) {
             return;
@@ -85,6 +111,39 @@ impl SessionStore {
         f(&mut s, now)
     }
 
+    pub(crate) fn record(&self, key: &str) -> Option<(Vec<u8>, String)> {
+        self.with(|s, now| {
+            s.live(key, now)
+                .map(|r| (r.value.clone(), r.family.clone()))
+        })
+    }
+
+    pub(crate) fn write(
+        &self,
+        family: &str,
+        records: &[crate::SessionWrite],
+        expected: Option<(&str, &[u8])>,
+    ) -> bool {
+        self.with(|s, now| {
+            if let Some((key, bytes)) = expected {
+                let Some(old) = s.live(key, now) else {
+                    return false;
+                };
+                if old.family != family {
+                    return false;
+                }
+                if old.value != bytes {
+                    s.revoke(family, now);
+                    return false;
+                }
+            }
+            for r in records {
+                s.insert(r.key.clone(), family, r.value.clone(), now + r.ttl);
+            }
+            true
+        })
+    }
+
     /// Stores `value` under `key` in `family` for `ttl`, replacing any record.
     pub fn put(
         &self,
@@ -94,21 +153,7 @@ impl SessionStore {
         ttl: Duration,
     ) {
         let (key, family) = (key.into(), family.into());
-        self.with(|s, now| {
-            s.unlink(&key);
-            s.families
-                .entry(family.clone())
-                .or_default()
-                .insert(key.clone());
-            s.records.insert(
-                key,
-                Record {
-                    value,
-                    family,
-                    expires: now + ttl,
-                },
-            );
-        });
+        self.with(|s, now| s.insert(key, &family, value, now + ttl));
     }
 
     /// The live record's value.
@@ -142,13 +187,7 @@ impl SessionStore {
 
     /// Removes every record of `family`; returns how many were live.
     pub fn revoke_family(&self, family: &str) -> usize {
-        self.with(|s, now| {
-            let keys = s.families.remove(family).unwrap_or_default();
-            keys.iter()
-                .filter_map(|k| s.records.remove(k))
-                .filter(|r| r.expires > now)
-                .count()
-        })
+        self.with(|s, now| s.revoke(family, now))
     }
 }
 

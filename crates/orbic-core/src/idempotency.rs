@@ -7,11 +7,13 @@
 //! stored or reused. In-process calls carry no body bytes and no transport
 //! retries, so they bypass it.
 
-use std::sync::Arc;
+use hyve_api::ErrorWire;
 
 use hyve_core::{ErrorKind, HyveError, HyveResult, Scope};
-use hyve_serde::AlignedBytes;
-use orbic_cache::{Begin, Cache, IdempotencyKey, Reservation};
+use hyve_serde::{AlignedBytes, Binary};
+use orbic_cache::{
+    Cache, IdempotencyKey, RequestBegin as Begin, RequestReservation as Reservation,
+};
 
 use crate::request::{Body, Payload, Principal, Rail, Request, ResponseMeta};
 
@@ -21,14 +23,6 @@ pub(crate) const MAX_KEY_LEN: usize = 255;
 /// Seconds a client waits before retrying a key that is still running.
 const IN_PROGRESS_RETRY_SECS: u64 = 1;
 
-/// A finished outcome kept for reuse.
-enum Stored {
-    Empty,
-    Json(String),
-    Binary(AlignedBytes),
-    Error(HyveError),
-}
-
 pub(crate) enum Gate {
     /// No gate for this request.
     Pass,
@@ -37,16 +31,15 @@ pub(crate) enum Gate {
 }
 
 /// Claims the request's key, or answers it from a previous outcome.
-pub(crate) fn begin(
+pub(crate) fn prepare(
     scope: &Scope,
     req: &Request,
-    meta: &mut ResponseMeta,
-) -> HyveResult<Result<Gate, Payload>> {
+) -> HyveResult<Option<(Cache, IdempotencyKey, u128)>> {
     let (Some(key), Some(principal)) = (&req.meta.idempotency_key, scope.get::<Principal>()) else {
-        return Ok(Ok(Gate::Pass));
+        return Ok(None);
     };
     if req.rail == Rail::InProcess {
-        return Ok(Ok(Gate::Pass));
+        return Ok(None);
     }
     if key.is_empty() || key.len() > MAX_KEY_LEN || key.chars().any(char::is_control) {
         return Err(HyveError::domain(
@@ -61,16 +54,30 @@ pub(crate) fn begin(
         path: req.path.clone(),
         key: key.clone(),
     };
-    match cache.idempotency().begin(id, digest(req.rail, &req.body)) {
+    Ok(Some(((*cache).clone(), id, digest(req.rail, &req.body))))
+}
+
+pub(crate) async fn begin(
+    prepared: Option<(Cache, IdempotencyKey, u128)>,
+    meta: &mut ResponseMeta,
+) -> HyveResult<Result<Gate, Payload>> {
+    let Some((cache, id, digest)) = prepared else {
+        return Ok(Ok(Gate::Pass));
+    };
+    match cache.begin_request(id, digest).await? {
         Begin::Started(r) => Ok(Ok(Gate::Run(r))),
-        Begin::Replay(stored) => match stored.downcast_ref::<Stored>() {
-            Some(Stored::Empty) => Ok(Err(Payload::Empty)),
-            Some(Stored::Json(s)) => Ok(Err(Payload::Json(s.clone()))),
-            Some(Stored::Binary(b)) => Ok(Err(Payload::Binary(b.clone()))),
-            Some(Stored::Error(e)) => Err(e.clone()),
-            None => Err(HyveError::internal(
-                "idempotency store holds a foreign value",
-            )),
+        Begin::Replay(bytes) => match bytes.split_first() {
+            Some((0, [])) => Ok(Err(Payload::Empty)),
+            Some((1, data)) => Ok(Err(Payload::Json(
+                std::str::from_utf8(data)
+                    .map_err(|_| HyveError::internal("invalid cached JSON reply"))?
+                    .to_owned(),
+            ))),
+            Some((2, data)) => Ok(Err(Payload::Binary(AlignedBytes::copy_from(data)))),
+            Some((3, data)) => Err(ErrorWire::from_binary(data)
+                .map_err(|_| HyveError::internal("invalid cached domain error"))?
+                .into()),
+            _ => Err(HyveError::internal("unrecognized cached reply")),
         },
         Begin::InProgress => {
             meta.retry_after = Some(IN_PROGRESS_RETRY_SECS);
@@ -89,16 +96,22 @@ pub(crate) fn begin(
 
 /// Stores successes and `Domain` errors; other errors release the key so the
 /// request can be retried.
-pub(crate) fn finish(reservation: Reservation, outcome: &HyveResult<Payload>) {
-    let stored = match outcome {
-        Ok(Payload::Empty) => Stored::Empty,
-        Ok(Payload::Json(s)) => Stored::Json(s.clone()),
-        Ok(Payload::Binary(b)) => Stored::Binary(b.clone()),
-        Ok(Payload::Value(_)) => return,
-        Err(e) if e.kind() == ErrorKind::Domain => Stored::Error(e.clone()),
-        Err(_) => return,
+pub(crate) fn encode(outcome: &HyveResult<Payload>) -> HyveResult<Option<Vec<u8>>> {
+    let error;
+    let (kind, body): (u8, &[u8]) = match outcome {
+        Ok(Payload::Empty) => (0, &[]),
+        Ok(Payload::Json(s)) => (1, s.as_bytes()),
+        Ok(Payload::Binary(b)) => (2, b),
+        Err(e) if e.kind() == ErrorKind::Domain => {
+            error = ErrorWire::from(e).to_binary()?;
+            (3, &error)
+        }
+        _ => return Ok(None),
     };
-    reservation.complete(Arc::new(stored));
+    let mut bytes = Vec::with_capacity(1 + body.len());
+    bytes.push(kind);
+    bytes.extend_from_slice(body);
+    Ok(Some(bytes))
 }
 
 /// 128-bit FNV-1a over the rail and the body bytes.

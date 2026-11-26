@@ -10,6 +10,7 @@ authors.workspace = true
 publish = false
 
 [features]
+cache-redis = ["server", "orbic/cache-redis"]
 ## Plays an app's `server` feature: keeps `#[server]` handler bodies.
 server = ["orbic/server"]
 

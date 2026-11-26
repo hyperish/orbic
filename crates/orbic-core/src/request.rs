@@ -92,11 +92,32 @@ impl Principal {
     }
 }
 
+/// Sender-provided authentication material accompanying an exact delivery body.
+#[derive(Clone)]
+pub struct DeliverySignature {
+    /// Stable ID across retries.
+    pub id: String,
+    /// Unix seconds encoded by the sender.
+    pub timestamp: String,
+    /// Versioned signatures covering the ID, timestamp and exact bytes.
+    pub signatures: String,
+}
+
+impl fmt::Debug for DeliverySignature {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeliverySignature").finish_non_exhaustive()
+    }
+}
+
 /// Request metadata that is not part of the body.
 #[derive(Debug, Clone, Default)]
 pub struct RequestMeta {
     /// The correlation ID the client sent; a new one is made otherwise.
     pub request_id: Option<RequestId>,
+    /// Validated trace identity of a calling service.
+    pub trace_parent: Option<hyve_trace::TraceParent>,
+    /// Signed webhook delivery metadata when supplied by the sender.
+    pub delivery_signature: Option<DeliverySignature>,
     /// `Idempotency-Key`.
     pub idempotency_key: Option<String>,
     /// The presented credential.

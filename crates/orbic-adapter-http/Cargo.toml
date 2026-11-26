@@ -8,7 +8,12 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+ipc = ["hyve/ipc"]
+serge = ["dep:orbic-adapter-serge"]
+
 [dependencies]
+orbic-adapter-serge = { workspace = true, optional = true }
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true

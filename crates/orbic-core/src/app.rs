@@ -112,6 +112,8 @@ impl OrbicApp {
         }
         Ok(Pipeline {
             inner: Arc::new(Inner {
+                #[cfg(feature = "jobs")]
+                timers: cx.timers,
                 router,
                 paths,
                 routes: cx.routes,
@@ -152,6 +154,8 @@ impl std::error::Error for AssemblyError {}
 /// A matched route and its decoded path parameters.
 type Matched<'a> = (&'a Route, Vec<(String, String)>);
 
+type BoundGuard = (Arc<dyn Guard>, Arc<str>);
+
 struct Route {
     method: Method,
     pattern: String,
@@ -159,13 +163,15 @@ struct Route {
     endpoint: Endpoint,
     describe: crate::component::Describe,
     scope: Scope,
-    guards: Vec<Arc<dyn Guard>>,
+    guards: Vec<BoundGuard>,
     server_fn: Option<&'static ServerFnDescriptor>,
     take: Option<crate::component::TakeRequest>,
 }
 
 #[derive(Default)]
 struct Assembly {
+    #[cfg(feature = "jobs")]
+    timers: Vec<crate::ScheduledTask>,
     routes: Vec<Route>,
     problems: Vec<String>,
 }
@@ -176,7 +182,7 @@ impl Assembly {
         c: BackendComponent,
         prefix: &str,
         parent: &Scope,
-        guards: &[Arc<dyn Guard>],
+        guards: &[BoundGuard],
         provided: &[ContextNeed],
     ) -> Scope {
         let scope = parent.child();
@@ -184,6 +190,18 @@ impl Assembly {
         for (need, provide) in c.provides {
             provide(&scope);
             provided.push(need);
+        }
+        #[cfg(feature = "jobs")]
+        for timer in c.timers {
+            match timer.assemble(prefix, &scope) {
+                Ok(task) if self.timers.iter().any(|t| t.name == task.name) => self
+                    .problems
+                    .push(format!("duplicate schedule `{}`", task.name)),
+                Ok(task) => self.timers.push(task),
+                Err(e) => self
+                    .problems
+                    .push(format!("schedule at `{prefix}`: {}", e.message())),
+            }
         }
         let mut guards = guards.to_vec();
         for g in c.guards {
@@ -199,7 +217,8 @@ impl Assembly {
                 }
             }
             provided.extend(g.provides());
-            guards.push(g);
+            let guard_key: Arc<str> = format!("{prefix}#{}:{}", guards.len(), g.name()).into();
+            guards.push((g, guard_key));
         }
         let has_cache = provided
             .iter()
@@ -289,6 +308,8 @@ pub struct Pipeline {
 }
 
 struct Inner {
+    #[cfg(feature = "jobs")]
+    timers: Vec<crate::ScheduledTask>,
     router: matchit::Router<usize>,
     /// Route indexes per path pattern.
     paths: Vec<Vec<usize>>,
@@ -336,6 +357,11 @@ impl std::fmt::Debug for RouteInfo<'_> {
 }
 
 impl Pipeline {
+    /// Component timers in declaration order. Test clients do not start them.
+    #[cfg(feature = "jobs")]
+    pub fn schedules(&self) -> &[crate::ScheduledTask] {
+        &self.inner.timers
+    }
     /// The registered routes in registration order.
     pub fn routes(&self) -> impl Iterator<Item = RouteInfo<'_>> {
         self.inner.routes.iter().map(|r| RouteInfo {
@@ -343,7 +369,7 @@ impl Pipeline {
             pattern: &r.pattern,
             name: r.name,
             server_fn: r.server_fn,
-            guards: r.guards.iter().map(|g| g.describe()).collect(),
+            guards: r.guards.iter().map(|(g, _)| g.describe()).collect(),
             describe: &r.describe,
         })
     }
@@ -409,6 +435,31 @@ impl Pipeline {
                 })
             }
         }
+    }
+
+    /// Whether any API method is registered for this concrete path.
+    pub fn owns_path(&self, path: &str) -> bool {
+        self.inner.router.at(path).is_ok()
+    }
+
+    /// Starts a request on a transport adapter, including graceful shutdown
+    /// accounting, tracing and inherited providers until the body is dropped.
+    pub fn adapter_request(
+        &self,
+        id: hyve_core::RequestId,
+        route: &str,
+    ) -> hyve_core::HyveResult<AdapterRequest> {
+        self.inner.state.in_flight.fetch_add(1, Ordering::SeqCst);
+        let request = AdapterRequest {
+            pipeline: self.clone(),
+            span: hyve_trace::Span::request(&self.inner.top, id, route),
+        };
+        if !self.is_accepting() {
+            return Err(
+                HyveError::infra("service_unavailable", "server is shutting down").retryable(true),
+            );
+        }
+        Ok(request)
     }
 
     /// Stops accepting requests: new ones fail with a retryable
@@ -486,6 +537,23 @@ impl Shutdown {
     }
 }
 
+/// An adapter request scope that stays live while its response is streamed.
+pub struct AdapterRequest {
+    pipeline: Pipeline,
+    span: hyve_trace::Span,
+}
+impl AdapterRequest {
+    /// Scope shared with authorization and the response producer.
+    pub fn scope(&self) -> &Scope {
+        self.span.scope()
+    }
+}
+impl Drop for AdapterRequest {
+    fn drop(&mut self) {
+        drop(InFlight(&self.pipeline.inner.state))
+    }
+}
+
 /// Counts a running request until dropped.
 struct InFlight<'a>(&'a Shutdown);
 
@@ -534,7 +602,7 @@ impl Inner {
         let outcome = if self.state.accepting.load(Ordering::SeqCst) {
             self.state.in_flight.fetch_add(1, Ordering::SeqCst);
             let _counted = InFlight(&self.state);
-            self.run(req, &mut meta).await
+            self.run(req, &mut meta, &request_id).await
         } else {
             Err(
                 HyveError::infra("service_unavailable", "the server is shutting down")
@@ -567,29 +635,39 @@ impl Inner {
         &self,
         req: Request,
         meta: &mut ResponseMeta,
+        request_id: &hyve_core::RequestId,
     ) -> Result<crate::request::Payload, HyveError> {
         let (route, params) = self.find(&req)?;
-        let scope = route.scope.child();
+        let span = hyve_trace::Span::incoming(
+            &route.scope,
+            request_id.clone(),
+            req.meta.trace_parent,
+            &route.pattern,
+        );
+        let scope = span.scope();
         let slot = std::sync::Arc::new(CredentialSlot::default());
         scope.provide_arc(slot.clone());
-        let result = scope
+        scope
             .scoped(async {
                 let method = route.server_fn.map_or(route.method, |d| d.method);
                 {
                     let mut cx = GuardCtx {
-                        scope: &scope,
+                        scope,
+                        guard_key: "",
                         method,
                         path: &req.path,
                         route: &route.pattern,
                         meta: &req.meta,
                         response: meta,
                     };
-                    for g in &route.guards {
+                    for (g, key) in &route.guards {
+                        cx.guard_key = key;
                         g.check(&mut cx).await?;
                     }
                 }
                 let reservation = if method == Method::Post {
-                    match idempotency::begin(&scope, &req, meta)? {
+                    let prepared = idempotency::prepare(scope, &req)?;
+                    match idempotency::begin(prepared, meta).await? {
                         Ok(Gate::Pass) => None,
                         Ok(Gate::Run(r)) => Some(r),
                         Err(replayed) => return Ok(replayed),
@@ -598,6 +676,7 @@ impl Inner {
                     None
                 };
                 let parts = Parts {
+                    path: req.path,
                     scope: scope.clone(),
                     rail: req.rail,
                     params,
@@ -607,7 +686,8 @@ impl Inner {
                 };
                 let outcome = (route.endpoint)(parts).await;
                 if let Some(r) = reservation {
-                    idempotency::finish(r, &outcome);
+                    let encoded = idempotency::encode(&outcome)?;
+                    r.finish(encoded).await?;
                 }
                 if outcome.is_ok()
                     && let Some(update) = slot.take()
@@ -616,9 +696,7 @@ impl Inner {
                 }
                 outcome
             })
-            .await;
-        scope.dispose();
-        result
+            .await
     }
 
     /// Route matching, including the fast rail's function and schema checks,

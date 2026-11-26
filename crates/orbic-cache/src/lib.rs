@@ -4,16 +4,20 @@
 //!   non-evicting stores the pipeline and guards use. Apps provide one.
 //! - [`CacheKey`], [`Tag`]: what `key!` and `tag!` build.
 //!
-//! The L2 (Redis/Valkey) tier is Phase 2 (`docs/05-implementation-plan.md`).
+//! The optional `redis` feature connects the same pipeline to a shared L2.
 
+mod authority;
 mod cache;
 mod clock;
 mod idempotency;
 mod key;
 mod rate;
+#[cfg(feature = "redis")]
+mod redis;
 mod session;
 mod ttl;
 
+pub use authority::{RequestBegin, RequestReservation, SessionWrite};
 pub use cache::{Cache, CacheOpts, DEFAULT_CAPACITY};
 pub use clock::{Clock, ManualClock};
 pub use idempotency::{

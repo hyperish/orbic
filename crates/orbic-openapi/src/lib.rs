@@ -15,6 +15,8 @@
 //! on the app, then [`attach`] puts the JSON document at that path, outside
 //! the pipeline.
 
+mod paths;
+
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use hyve::api::Method;
@@ -22,13 +24,14 @@ use hyve::validate::{Constraint, Definition, FieldSchema, SchemaNode, SchemaRegi
 use hyve::{HyveError, Value};
 use orbic_adapter_http::{HttpApp, HttpError, status_of};
 use orbic_core::{OrbicApp, ParamsFrom, Pipeline, RouteInfo, RouteShape};
+use utoipa::openapi::extensions::Extensions;
 use utoipa::openapi::path::{
-    HttpMethod, Operation, OperationBuilder, Parameter, ParameterBuilder, ParameterIn,
+    Operation, OperationBuilder, Parameter, ParameterBuilder, ParameterIn,
 };
 use utoipa::openapi::request_body::RequestBodyBuilder;
 use utoipa::openapi::schema::{
-    AdditionalProperties, AnyOfBuilder, ArrayBuilder, KnownFormat, ObjectBuilder, Ref, Schema,
-    SchemaFormat, SchemaType, Type,
+    AdditionalProperties, AllOfBuilder, AnyOfBuilder, ArrayBuilder, KnownFormat, ObjectBuilder,
+    Ref, Schema, SchemaFormat, SchemaType, Type,
 };
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, Http, HttpAuthScheme, SecurityScheme};
 use utoipa::openapi::{
@@ -79,11 +82,16 @@ pub fn attach(http: HttpApp) -> Result<HttpApp, HttpError> {
     let Some(path) = http.pipeline().provided::<OpenApiPath>() else {
         return Ok(http);
     };
-    let json = document(http.pipeline(), http.session_cookie())
-        .to_json()
-        .expect("an OpenAPI document always serializes");
+    let json = json(&http);
     let path = path.0.clone();
     http.document(&path, "application/json", json)
+}
+
+/// Exports exactly the document served by the HTTP adapter.
+pub fn json(http: &HttpApp) -> String {
+    document(http.pipeline(), http.session_cookie())
+        .to_json()
+        .expect("an OpenAPI document always serializes")
 }
 
 const ENVELOPE: &str = "ErrorEnvelope";
@@ -113,12 +121,15 @@ pub fn document(pipeline: &Pipeline, session_cookie: &str) -> OpenApi {
     for (route, shape) in &routes {
         authenticated |= route.guards.iter().any(|g| g.authenticates);
         let op = operation(route, shape, &registry, &names, &mut ids);
-        paths.add_path_operation(template(route.pattern), vec![http_method(route.method)], op);
+        paths::add(&mut paths, template(route.pattern), route.method, op);
     }
 
     let mut components = ComponentsBuilder::new();
     for (name, def) in registry.definitions() {
-        components = components.schema(name, definition(def));
+        components = components.schema(
+            name,
+            annotated(definition(def), None, registry.has_check(name)),
+        );
     }
     components = components
         .schema(&names.error, error_schema())
@@ -163,15 +174,6 @@ impl Names {
             envelope: free(ENVELOPE),
             page: free(PAGE),
         }
-    }
-}
-
-fn http_method(m: Method) -> HttpMethod {
-    match m {
-        Method::Get => HttpMethod::Get,
-        Method::Post => HttpMethod::Post,
-        Method::Patch => HttpMethod::Patch,
-        Method::Delete => HttpMethod::Delete,
     }
 }
 
@@ -534,9 +536,48 @@ fn number(v: &Value) -> Option<utoipa::Number> {
 
 /// A schema node as JSON travels (`hyve/docs/02-architecture.md` JSON 어댑터).
 fn schema(node: &SchemaNode, constraints: &[Constraint]) -> RefOr<Schema> {
+    let pattern = constraints.iter().find_map(|c| match c {
+        Constraint::Pattern(pattern) => Some(*pattern),
+        _ => None,
+    });
+    annotated(
+        wire_schema(node, constraints),
+        pattern,
+        constraints.contains(&Constraint::Check),
+    )
+}
+
+fn annotated(mut schema: RefOr<Schema>, pattern: Option<&str>, check: bool) -> RefOr<Schema> {
+    if pattern.is_none() && !check {
+        return schema;
+    }
+    let mut extensions = Extensions::default();
+    if let Some(pattern) = pattern {
+        extensions.insert("x-hyve-regex".into(), pattern.into());
+    }
+    if check {
+        extensions.insert("x-hyve-check".into(), true.into());
+    }
+    let slot = match &mut schema {
+        RefOr::T(Schema::Object(o)) => &mut o.extensions,
+        RefOr::T(Schema::Array(a)) => &mut a.extensions,
+        RefOr::T(Schema::AnyOf(a)) => &mut a.extensions,
+        _ => {
+            return AllOfBuilder::new()
+                .item(schema)
+                .extensions(Some(extensions))
+                .into();
+        }
+    };
+    slot.get_or_insert_with(Extensions::default)
+        .merge(extensions);
+    schema
+}
+
+fn wire_schema(node: &SchemaNode, constraints: &[Constraint]) -> RefOr<Schema> {
     let len = constraints.iter().find_map(|c| match c {
         Constraint::Len { min, max } => Some((*min, *max)),
-        Constraint::Range { .. } => None,
+        _ => None,
     });
     let size = |n: Option<u64>| n.and_then(|n| usize::try_from(n).ok());
     match node {
@@ -657,7 +698,7 @@ fn schema(node: &SchemaNode, constraints: &[Constraint]) -> RefOr<Schema> {
         SchemaNode::Map { values } => ObjectBuilder::new()
             .additional_properties(Some(AdditionalProperties::RefOr(schema(values, &[]))))
             .into(),
-        SchemaNode::Nullable(inner) => nullable(schema(inner, constraints)),
+        SchemaNode::Nullable(inner) => nullable(wire_schema(inner, constraints)),
         SchemaNode::Any => ObjectBuilder::new()
             .schema_type(SchemaType::AnyValue)
             .into(),

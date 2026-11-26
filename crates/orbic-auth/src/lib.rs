@@ -17,6 +17,7 @@
 //! [`sign_out`], [`refresh`] and [`current`].
 
 mod token;
+pub use token::{key as credential_hash, new as random_credential};
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -25,7 +26,7 @@ use std::time::Duration;
 use hyve::api::{BoxFuture, ContextNeed, Method, Wire};
 use hyve::prelude::*;
 use hyve::serde::Binary as _;
-use orbic_cache::Cache;
+use orbic_cache::{Cache, SessionWrite};
 use orbic_core::{
     Credential, CredentialSlot, CredentialUpdate, Guard, GuardCtx, GuardShape, Principal,
 };
@@ -151,13 +152,43 @@ pub fn issue<U: SessionUser>(
     user: &U,
     client: Client,
 ) -> HyveResult<Issued> {
-    let session = token::new()?;
+    if !cache.is_local() {
+        return Err(HyveError::internal(
+            "use issue_async for a shared session store",
+        ));
+    }
     let family = token::new()?;
+    let (issued, records) = credentials(cfg, user, client)?;
+    for r in records {
+        cache.sessions().put(r.key, &family, r.value, r.ttl);
+    }
+    Ok(issued)
+}
+
+/// Creates a session and its refresh credential in the authoritative store.
+pub async fn issue_async<U: SessionUser>(
+    cache: &Cache,
+    cfg: &AuthConfig,
+    user: &U,
+    client: Client,
+) -> HyveResult<Issued> {
+    let family = token::new()?;
+    let (issued, records) = credentials(cfg, user, client)?;
+    cache.create_sessions(&family, &records).await?;
+    Ok(issued)
+}
+
+fn credentials<U: SessionUser>(
+    cfg: &AuthConfig,
+    user: &U,
+    client: Client,
+) -> HyveResult<(Issued, Vec<SessionWrite>)> {
+    let session = token::new()?;
     let csrf = match client {
         Client::Web => Some(token::new()?),
         Client::Bearer => None,
     };
-    let user_bytes = user.to_binary()?.to_vec();
+    let user_bytes = user.to_binary()?.into_vec();
     let until =
         now_micros().saturating_add(i64::try_from(cfg.absolute.as_micros()).unwrap_or(i64::MAX));
     let record = SessionRecord {
@@ -166,36 +197,36 @@ pub fn issue<U: SessionUser>(
         csrf: csrf.clone(),
         until,
     };
-    let store = cache.sessions();
-    store.put(
-        token::key("s", &session),
-        family.clone(),
-        record.to_binary()?.to_vec(),
-        cfg.idle,
-    );
+    let mut records = vec![SessionWrite {
+        key: token::key("s", &session),
+        value: record.to_binary()?.into_vec(),
+        ttl: cfg.idle.min(cfg.absolute),
+    }];
     let refresh = match client {
         Client::Bearer => {
             let r = token::new()?;
-            let rec = RefreshRecord {
+            let record = RefreshRecord {
                 user: user_bytes,
                 principal: user.principal(),
                 used: false,
             };
-            store.put(
-                token::key("r", &r),
-                family,
-                rec.to_binary()?.to_vec(),
-                cfg.refresh,
-            );
+            records.push(SessionWrite {
+                key: token::key("r", &r),
+                value: record.to_binary()?.into_vec(),
+                ttl: cfg.refresh,
+            });
             Some(r)
         }
         Client::Web => None,
     };
-    Ok(Issued {
-        session,
-        csrf,
-        refresh,
-    })
+    Ok((
+        Issued {
+            session,
+            csrf,
+            refresh,
+        },
+        records,
+    ))
 }
 
 fn signed_in(
@@ -243,7 +274,7 @@ fn request_scope() -> HyveResult<(Scope, Arc<Cache>)> {
 pub async fn sign_in<U: SessionUser>(user: &U, client: Client) -> HyveResult<SignedIn> {
     let (scope, cache) = request_scope()?;
     let cfg = config(&scope);
-    let issued = issue(&cache, &cfg, user, client)?;
+    let issued = issue_async(&cache, &cfg, user, client).await?;
     Ok(signed_in(
         issued,
         &cfg,
@@ -276,7 +307,7 @@ pub async fn sign_out() -> HyveResult<()> {
     let current = scope
         .require::<CurrentSession>()
         .map_err(|_| unauthenticated())?;
-    cache.sessions().revoke_family(&current.family);
+    cache.revoke_sessions(&current.family).await?;
     if let Some(slot) = scope.get::<CredentialSlot>() {
         slot.set(CredentialUpdate::ClearSession);
     }
@@ -289,59 +320,31 @@ pub async fn sign_out() -> HyveResult<()> {
 pub async fn refresh<U: SessionUser>(refresh_token: &str) -> HyveResult<SignedIn> {
     let (scope, cache) = request_scope()?;
     let cfg = config(&scope);
-    let store = cache.sessions();
     let key = token::key("r", refresh_token);
-    let Some((bytes, family)) = store.take(&key) else {
-        return Err(unauthenticated());
-    };
-    let mut record: RefreshRecord = decode(&bytes)?;
-    if record.used {
-        store.revoke_family(&family);
+    let (bytes, family) = cache
+        .session_record(&key)
+        .await?
+        .ok_or_else(unauthenticated)?;
+    let mut previous: RefreshRecord = decode(&bytes)?;
+    if previous.used {
+        cache.revoke_sessions(&family).await?;
         return Err(unauthenticated());
     }
-    // Keep a used marker so a replay is recognised, until it would expire.
-    record.used = true;
-    store.put(
-        key,
-        family.clone(),
-        record.to_binary()?.to_vec(),
-        cfg.refresh,
-    );
-
-    let user: U = decode(&record.user)?;
-    let session = token::new()?;
-    let next = token::new()?;
-    let until =
-        now_micros().saturating_add(i64::try_from(cfg.absolute.as_micros()).unwrap_or(i64::MAX));
-    let rec = SessionRecord {
-        user: record.user.clone(),
-        principal: user.principal(),
-        csrf: None,
-        until,
-    };
-    store.put(
-        token::key("s", &session),
-        family.clone(),
-        rec.to_binary()?.to_vec(),
-        cfg.idle,
-    );
-    let fresh = RefreshRecord {
-        user: record.user,
-        principal: record.principal,
-        used: false,
-    };
-    store.put(
-        token::key("r", &next),
-        family,
-        fresh.to_binary()?.to_vec(),
-        cfg.refresh,
-    );
-    Ok(SignedIn {
-        csrf_token: None,
-        access_token: Some(session),
-        refresh_token: Some(next),
-        expires_in: cfg.idle.as_secs(),
-    })
+    let user: U = decode(&previous.user)?;
+    let (issued, mut records) = credentials(&cfg, &user, Client::Bearer)?;
+    previous.used = true;
+    records.push(SessionWrite {
+        key: key.clone(),
+        value: previous.to_binary()?.into_vec(),
+        ttl: cfg.refresh,
+    });
+    if !cache
+        .rotate_sessions(&family, &key, &bytes, &records)
+        .await?
+    {
+        return Err(unauthenticated());
+    }
+    Ok(signed_in(issued, &cfg, Client::Bearer, None))
 }
 
 type Rule<U> = Arc<dyn Fn(&U) -> bool + Send + Sync>;
@@ -413,14 +416,12 @@ impl<U: SessionUser> Guard for AuthGuard<U> {
                 Some(Credential::Bearer(token)) => (token.as_str(), None),
                 None => return Err(unauthenticated()),
             };
-            let store = cache.sessions();
             let key = token::key("s", token);
-            let (Some(bytes), Some(family)) = (store.get(&key), store.family(&key)) else {
+            let Some((bytes, family)) = cache.session_record(&key).await? else {
                 return Err(unauthenticated());
             };
             let record: SessionRecord = decode(&bytes)?;
             if record.until <= now_micros() {
-                store.remove(&key);
                 return Err(unauthenticated());
             }
             // Cookies travel automatically; state changes must prove the page
@@ -445,7 +446,15 @@ impl<U: SessionUser> Guard for AuthGuard<U> {
             {
                 return Err(HyveError::domain("forbidden", "not allowed"));
             }
-            store.touch(&key, config(cx.scope).idle);
+            let remaining =
+                Duration::from_micros(record.until.saturating_sub(now_micros()).max(0) as u64);
+            if remaining.is_zero()
+                || !cache
+                    .renew_session(&key, &family, config(cx.scope).idle.min(remaining))
+                    .await?
+            {
+                return Err(unauthenticated());
+            }
             cx.scope.provide(Principal::new(record.principal));
             cx.scope.provide(CurrentSession {
                 key,

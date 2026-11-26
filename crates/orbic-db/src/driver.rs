@@ -143,44 +143,36 @@ pub(crate) mod sqlite {
         q
     }
 
-    pub(crate) fn decode(
-        row: &sqlx::sqlite::SqliteRow,
-        want: &[Want<'_>],
-    ) -> HyveResult<Vec<DbValue>> {
-        want.iter()
-            .map(|w| {
-                let i = index(row.columns().iter().map(|c| c.name()), w.name)?;
-                let raw = row.try_get_raw(i).map_err(|e| decode_error(w.name, e))?;
-                if raw.is_null() {
-                    return Ok(DbValue::Null);
-                }
-                let storage = raw.type_info().name().to_owned();
-                let r = match w.ty {
-                    SqlType::Bool => row.try_get::<bool, _>(i).map(DbValue::Bool),
-                    SqlType::Int => row.try_get::<i64, _>(i).map(DbValue::Int),
-                    SqlType::Float => row.try_get::<f64, _>(i).map(DbValue::Float),
-                    SqlType::Text => row.try_get::<String, _>(i).map(DbValue::Text),
-                    SqlType::Bytes => row.try_get::<Vec<u8>, _>(i).map(DbValue::Bytes),
-                    SqlType::Timestamp if storage == "INTEGER" => {
-                        let us = row
-                            .try_get_unchecked::<i64, _>(i)
-                            .map_err(|e| decode_error(w.name, e))?;
-                        return Timestamp::from_unix_micros(us)
-                            .map(DbValue::Timestamp)
-                            .ok_or_else(|| decode_error(w.name, "timestamp out of range"));
-                    }
-                    SqlType::Timestamp => {
-                        let s = row
-                            .try_get_unchecked::<String, _>(i)
-                            .map_err(|e| decode_error(w.name, e))?;
-                        return s.parse().map(DbValue::Timestamp).map_err(|_| {
-                            decode_error(w.name, format!("`{s}` is not a timestamp"))
-                        });
-                    }
-                };
-                r.map_err(|e| decode_error(w.name, e))
-            })
-            .collect()
+    pub(crate) fn field(row: &sqlx::sqlite::SqliteRow, i: usize, w: &Want) -> HyveResult<DbValue> {
+        let raw = row.try_get_raw(i).map_err(|e| decode_error(w.name, e))?;
+        if raw.is_null() {
+            return Ok(DbValue::Null);
+        }
+        let r = match w.ty {
+            SqlType::Bool => crate::sqlx_row::checked::<Sqlite, bool>(raw, i).map(DbValue::Bool),
+            SqlType::Int => crate::sqlx_row::checked::<Sqlite, i64>(raw, i).map(DbValue::Int),
+            SqlType::Float => crate::sqlx_row::checked::<Sqlite, f64>(raw, i).map(DbValue::Float),
+            SqlType::Text => crate::sqlx_row::checked::<Sqlite, String>(raw, i).map(DbValue::Text),
+            SqlType::Bytes => {
+                crate::sqlx_row::checked::<Sqlite, Vec<u8>>(raw, i).map(DbValue::Bytes)
+            }
+            SqlType::Timestamp if raw.type_info().name() == "INTEGER" => {
+                let us = <i64 as sqlx::Decode<Sqlite>>::decode(raw)
+                    .map_err(|e| decode_error(w.name, e))?;
+                return Timestamp::from_unix_micros(us)
+                    .map(DbValue::Timestamp)
+                    .ok_or_else(|| decode_error(w.name, "timestamp out of range"));
+            }
+            SqlType::Timestamp => {
+                let s = <String as sqlx::Decode<Sqlite>>::decode(raw)
+                    .map_err(|e| decode_error(w.name, e))?;
+                return s
+                    .parse()
+                    .map(DbValue::Timestamp)
+                    .map_err(|_| decode_error(w.name, format!("`{s}` is not a timestamp")));
+            }
+        };
+        r.map_err(|e| decode_error(w.name, e))
     }
 }
 
@@ -211,42 +203,69 @@ pub(crate) mod pg {
         q
     }
 
-    pub(crate) fn decode(
-        row: &sqlx::postgres::PgRow,
-        want: &[Want<'_>],
-    ) -> HyveResult<Vec<DbValue>> {
-        want.iter()
-            .map(|w| {
-                let i = index(row.columns().iter().map(|c| c.name()), w.name)?;
-                let raw = row.try_get_raw(i).map_err(|e| decode_error(w.name, e))?;
-                if raw.is_null() {
-                    return Ok(DbValue::Null);
-                }
-                let r = match w.ty {
-                    SqlType::Bool => row.try_get::<bool, _>(i).map(DbValue::Bool),
-                    SqlType::Int => match raw.type_info().name() {
-                        "INT2" => row.try_get::<i16, _>(i).map(|v| DbValue::Int(v.into())),
-                        "INT4" => row.try_get::<i32, _>(i).map(|v| DbValue::Int(v.into())),
-                        _ => row.try_get::<i64, _>(i).map(DbValue::Int),
-                    },
-                    SqlType::Float => match raw.type_info().name() {
-                        "FLOAT4" => row.try_get::<f32, _>(i).map(|v| DbValue::Float(v.into())),
-                        _ => row.try_get::<f64, _>(i).map(DbValue::Float),
-                    },
-                    SqlType::Text => row.try_get::<String, _>(i).map(DbValue::Text),
-                    SqlType::Bytes => row.try_get::<Vec<u8>, _>(i).map(DbValue::Bytes),
-                    SqlType::Timestamp => {
-                        row.try_get::<PgTs, _>(i).map(|t| DbValue::Timestamp(t.0))
-                    }
-                };
-                r.map_err(|e| decode_error(w.name, e))
-            })
-            .collect()
+    pub(crate) fn field(row: &sqlx::postgres::PgRow, i: usize, w: &Want) -> HyveResult<DbValue> {
+        let raw = row.try_get_raw(i).map_err(|e| decode_error(w.name, e))?;
+        if raw.is_null() {
+            return Ok(DbValue::Null);
+        }
+        let r = match w.ty {
+            SqlType::Bool => crate::sqlx_row::checked::<Postgres, bool>(raw, i).map(DbValue::Bool),
+            SqlType::Int => match raw.type_info().name() {
+                "INT2" => crate::sqlx_row::checked::<Postgres, i16>(raw, i)
+                    .map(|v| DbValue::Int(v.into())),
+                "INT4" => crate::sqlx_row::checked::<Postgres, i32>(raw, i)
+                    .map(|v| DbValue::Int(v.into())),
+                _ => crate::sqlx_row::checked::<Postgres, i64>(raw, i).map(DbValue::Int),
+            },
+            SqlType::Float => match raw.type_info().name() {
+                "FLOAT4" => crate::sqlx_row::checked::<Postgres, f32>(raw, i)
+                    .map(|v| DbValue::Float(v.into())),
+                _ => crate::sqlx_row::checked::<Postgres, f64>(raw, i).map(DbValue::Float),
+            },
+            SqlType::Text => {
+                crate::sqlx_row::checked::<Postgres, String>(raw, i).map(DbValue::Text)
+            }
+            SqlType::Bytes => {
+                crate::sqlx_row::checked::<Postgres, Vec<u8>>(raw, i).map(DbValue::Bytes)
+            }
+            SqlType::Timestamp => {
+                crate::sqlx_row::checked::<Postgres, PgTs>(raw, i).map(|t| DbValue::Timestamp(t.0))
+            }
+        };
+        r.map_err(|e| decode_error(w.name, e))
     }
 }
 
-fn index<'a>(mut names: impl Iterator<Item = &'a str>, name: &str) -> HyveResult<usize> {
-    names
-        .position(|n| n == name)
-        .ok_or_else(|| decode_error(name, "not in the result"))
+/// Resolve names once for each statement layout. SQLite can return multiple
+/// layouts from one query, and duplicate names select the first column.
+pub(crate) fn decode_rows<R: sqlx::Row, M>(
+    rows: &[R],
+    want: &[Want],
+    field: impl Fn(&R, usize, &Want) -> HyveResult<DbValue>,
+    map: impl Fn(&mut dyn Iterator<Item = HyveResult<DbValue>>) -> HyveResult<M>,
+) -> HyveResult<Vec<M>> {
+    let mut previous = None;
+    let mut indices = Vec::with_capacity(want.len());
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let columns = row.columns();
+        let layout = (columns.as_ptr(), columns.len());
+        if previous != Some(layout) {
+            indices.clear();
+            for w in want {
+                let index = columns
+                    .iter()
+                    .position(|column| column.name() == w.name)
+                    .ok_or_else(|| decode_error(w.name, "not in the result"))?;
+                indices.push(index);
+            }
+            previous = Some(layout);
+        }
+        let mut fields = indices
+            .iter()
+            .zip(want)
+            .map(|(&index, w)| field(row, index, w));
+        out.push(map(&mut fields)?);
+    }
+    Ok(out)
 }

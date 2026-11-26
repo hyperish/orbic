@@ -26,6 +26,8 @@
 
 #[cfg(feature = "server")]
 mod in_process;
+#[cfg(feature = "jobs")]
+mod scheduler;
 #[cfg(feature = "server")]
 mod testing;
 
@@ -40,7 +42,7 @@ pub use crate::in_process::InProcess;
 #[cfg(feature = "server")]
 pub use crate::testing::{TestClient, TestRequest, TestResponse};
 #[cfg(feature = "server")]
-pub use orbic_adapter_http::{HttpApp, HttpConfig, HttpError};
+pub use orbic_adapter_http::{HttpApp, HttpConfig, HttpError, ServerListener};
 #[cfg(feature = "server")]
 pub use orbic_auth::{AuthConfig, AuthGuard, Client, SessionUser, SignedIn};
 #[cfg(feature = "server")]
@@ -52,8 +54,18 @@ pub use orbic_core::{
 };
 #[cfg(feature = "server")]
 pub use orbic_db::{Db, Migrations, OrbicConfig, Tx};
+#[cfg(feature = "jobs")]
+pub use orbic_jobs as jobs;
+#[cfg(feature = "msa")]
+pub use orbic_msa as msa;
+#[cfg(feature = "notify")]
+pub use orbic_notify as notify;
 #[cfg(feature = "server")]
 pub use orbic_openapi::{OpenApiExt, OpenApiInfo};
+#[cfg(feature = "realtime")]
+pub use orbic_realtime::{self as realtime, RoomExt};
+#[cfg(feature = "storage")]
+pub use orbic_storage as storage;
 
 /// Why an app could not be put behind HTTP.
 #[cfg(feature = "server")]
@@ -87,17 +99,38 @@ pub fn http_app(app: OrbicApp) -> Result<HttpApp, BuildError> {
     orbic_openapi::attach(http).map_err(BuildError::Http)
 }
 
+/// Exports the app's OpenAPI contract for a schema baseline or `hyve lint`.
+/// Assembly checks the same routes and guards as the HTTP server.
+#[cfg(feature = "server")]
+pub fn openapi_json(app: OrbicApp) -> Result<String, BuildError> {
+    let pipeline = app.build().map_err(BuildError::Assembly)?;
+    let http = HttpApp::new(pipeline).map_err(BuildError::Http)?;
+    Ok(orbic_openapi::json(&http))
+}
+
 /// Serves `app` over HTTP/1.1 on `listener` until `shutdown` resolves
 /// ([`HttpApp::serve`]: plain HTTP only on loopback, graceful drain).
 #[cfg(feature = "server")]
 pub async fn serve(
     app: OrbicApp,
-    listener: tokio::net::TcpListener,
+    listener: impl ServerListener,
     shutdown: impl std::future::Future<Output = ()>,
 ) -> std::io::Result<()> {
     let http = http_app(app).map_err(std::io::Error::other)?;
+    #[cfg(feature = "jobs")]
+    if !http.pipeline().schedules().is_empty() {
+        return scheduler::serve(http, listener, shutdown).await;
+    }
     http.serve(listener, shutdown).await
 }
+
+/// Same-user local RPC listeners for use with [`serve`].
+#[cfg(all(feature = "ipc", any(unix, windows)))]
+pub use hyve::ipc;
+
+/// Mount a production web bundle and its route policies at the app root.
+#[cfg(feature = "serge")]
+pub use orbic_adapter_serge as site;
 
 /// Everything most code needs: `use orbic::prelude::*;` (next to
 /// `use hyve::prelude::*;`).
@@ -109,6 +142,8 @@ pub mod prelude {
         OrbicApp, RateLimit, SessionUser, SignedIn, TestClient, Tx, component,
     };
     pub use orbic_macros::{key, sql, table, tag, ttl};
+    #[cfg(feature = "realtime")]
+    pub use orbic_realtime::RoomExt;
 }
 
 #[doc(hidden)]

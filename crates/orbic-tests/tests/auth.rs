@@ -408,3 +408,45 @@ impl GetMe for OrbicApp {
         self.route(Method::Get, "/me", me)
     }
 }
+
+#[cfg(feature = "cache-redis")]
+#[tokio::test]
+#[ignore = "needs a dedicated Redis/Valkey service; scripts/test-cache.sh"]
+async fn shared_sessions_are_revoked_on_every_replica() {
+    let url = std::env::var("HYPERISH_TEST_REDIS_URL").unwrap();
+    let namespace = Ulid::new().to_string();
+    let a = app(Cache::tiered(&url, &namespace).await.unwrap());
+    let b = app(Cache::tiered(&url, &namespace).await.unwrap());
+    let (_, signed) = sign_in(&a, true).await;
+    let cred = Some(Credential::Bearer(signed.access_token.unwrap()));
+    assert_eq!(
+        json::<String>(&b.dispatch(with(Method::Get, "/v1/me", cred.clone())).await),
+        "ada"
+    );
+    let rotate = || {
+        Request::new(Method::Post, "/refresh").json(to_json(&RefreshInput {
+            refresh_token: signed.refresh_token.clone().unwrap(),
+        }))
+    };
+    let (one, two) = tokio::join!(a.dispatch(rotate()), b.dispatch(rotate()));
+    let (success, denied) = if one.outcome.is_ok() {
+        (one, two)
+    } else {
+        (two, one)
+    };
+    assert_eq!(code(&denied), "unauthenticated");
+    let fresh: SignedIn = json(&success);
+    let fresh = Some(Credential::Bearer(fresh.access_token.unwrap()));
+    for replica in [&a, &b] {
+        for token in [&cred, &fresh] {
+            assert_eq!(
+                code(
+                    &replica
+                        .dispatch(with(Method::Get, "/v1/me", token.clone()))
+                        .await
+                ),
+                "unauthenticated"
+            );
+        }
+    }
+}

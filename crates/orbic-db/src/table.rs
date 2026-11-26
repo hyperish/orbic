@@ -23,6 +23,37 @@ pub trait Table: Sized + Send + 'static {
 
     /// Builds the model from values in column order.
     fn from_values(values: Vec<DbValue>) -> Result<Self, HyveError>;
+
+    /// Builds a model one field at a time. Existing hand-written tables can keep using from_values.
+    fn from_row(
+        values: &mut dyn Iterator<Item = Result<DbValue, HyveError>>,
+    ) -> Result<Self, HyveError> {
+        Self::from_values(values.collect::<Result<_, _>>()?)
+    }
+}
+
+/// Declares a crate-private result row for a named SQL projection.
+#[macro_export]
+macro_rules! projection {
+    ($name:ident, $table:literal, $($field:ident : $ty:ty),+ $(,)?) => {
+        pub(crate) struct $name { $(pub(crate) $field: $ty),+ }
+        impl $crate::Table for $name {
+            const NAME: &'static str = $table;
+            const PK: &'static str = Self::COLUMNS[0];
+            const COLUMNS: &'static [&'static str] = &[$(stringify!($field)),+];
+            const TYPES: &'static [($crate::SqlType, bool)] = &[$((
+                <$ty as $crate::SqlValue>::TYPE, <$ty as $crate::SqlValue>::NULLABLE)),+];
+            fn values(&self) -> Vec<$crate::DbValue> {
+                vec![$($crate::SqlValue::to_db(&self.$field)),+]
+            }
+            fn from_values(values: Vec<$crate::DbValue>) -> $crate::ProjectionResult<Self> {
+                Self::from_row(&mut values.into_iter().map(Ok))
+            }
+            fn from_row(fields: &mut dyn Iterator<Item = $crate::ProjectionResult<$crate::DbValue>>) -> $crate::ProjectionResult<Self> {
+                Ok(Self { $($field: $crate::next_column(fields, Self::NAME, stringify!($field))?),+ })
+            }
+        }
+    }
 }
 
 /// A typed column of `M` holding `T` (`Project::OWNER_ID`), for chaining
@@ -67,8 +98,18 @@ pub fn column_value<T: SqlValue>(
     table: &str,
     column: &str,
 ) -> Result<T, HyveError> {
+    next_column(&mut values.map(Ok), table, column)
+}
+
+/// Decodes a field read directly from the driver for a generated projection.
+pub fn next_column<T: SqlValue>(
+    values: &mut dyn Iterator<Item = Result<DbValue, HyveError>>,
+    table: &str,
+    column: &str,
+) -> Result<T, HyveError> {
     let v = values
         .next()
+        .transpose()?
         .ok_or_else(|| column_error(table, column, "missing from the row".into()))?;
     T::from_db(v).map_err(|why| column_error(table, column, why))
 }

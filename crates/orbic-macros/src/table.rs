@@ -96,7 +96,7 @@ pub(crate) fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenS
     let fields = columns
         .iter()
         .zip(&names)
-        .map(|((i, t), n)| quote!(#i: #db::column_value::<#t>(&mut __values, #table, #n)?));
+        .map(|((i, t), n)| quote!(#i: #db::next_column::<#t>(__values, #table, #n)?));
     let pk_name = column_name(&pk);
 
     Ok(quote! {
@@ -124,7 +124,12 @@ pub(crate) fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenS
                     fn from_values(
                         __values: ::std::vec::Vec<#db::DbValue>,
                     ) -> ::core::result::Result<Self, ::orbic::__private::HyveError> {
-                        let mut __values = __values.into_iter();
+                        Self::from_row(&mut __values.into_iter().map(::core::result::Result::Ok))
+                    }
+
+                    fn from_row(
+                        __values: &mut dyn ::core::iter::Iterator<Item = #db::ProjectionResult<#db::DbValue>>,
+                    ) -> #db::ProjectionResult<Self> {
                         ::core::result::Result::Ok(#ty { #(#fields),* })
                     }
                 }

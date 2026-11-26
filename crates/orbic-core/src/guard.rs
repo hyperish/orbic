@@ -10,6 +10,8 @@ pub struct GuardCtx<'r> {
     /// The request scope; a guard provides request values (`CurrentUser`)
     /// here for the handler.
     pub scope: &'r Scope,
+    /// Stable identity of this guard at its component mount, shared across replicas.
+    pub guard_key: &'r str,
     /// The method the route is bound to (for `#[server]` functions on the
     /// fast rail, the bound method, not `POST`).
     pub method: Method,

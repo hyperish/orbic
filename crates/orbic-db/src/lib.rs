@@ -9,10 +9,10 @@
 //!   refused (unsent) on a dialect it was not verified on.
 //! - [`Migrations`], and [`testing::TempPostgres`] for PostgreSQL tests.
 //! - [`OrbicConfig`]: `[orbic]` in `hyve.toml`; [`Db::from_config`] connects
-//!   to its `database_url` (`hyve preview` points it at a local database).
+//!   to its `database_url` (`hyve dev` points it at a local database).
 //!
-//! The drivers are `sqlx` 0.9.1, pinned rather than forked
-//! (`docs/02-architecture.md` §3 실행 기록).
+//! PostgreSQL and SQLite use sqlx 0.9.1. Generated tables decode borrowed
+//! driver values with Orbic's specialized checked column reader.
 
 mod config;
 mod db;
@@ -22,6 +22,7 @@ mod driver;
 mod migrate;
 mod query;
 mod sql;
+mod sqlx_row;
 mod table;
 pub mod testing;
 mod value;
@@ -30,8 +31,10 @@ pub use config::{DATABASE_URL_ENV, OrbicConfig};
 pub use db::{Db, Dialect, Exec, Target, Tx};
 #[cfg(feature = "codegen")]
 pub use describe::{Described, sql_type};
+#[doc(hidden)]
+pub use hyve_core::HyveResult as ProjectionResult;
 pub use migrate::{Migration, Migrations, workspace_root};
 pub use query::{Delete, Order, Select, Update};
 pub use sql::{Bind, Encode, Marker, Sql, assert_all_columns, assert_column, bind, types};
-pub use table::{Column, Table, column_value};
+pub use table::{Column, Table, column_value, next_column};
 pub use value::{DbValue, SqlType, SqlValue};

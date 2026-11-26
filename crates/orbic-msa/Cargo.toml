@@ -1,0 +1,19 @@
+[package]
+name = "orbic-msa"
+description = "Traced service RPC and transactional events for Orbic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+hyve.workspace = true
+orbic-db.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+tokio = { workspace = true, features = ["time", "macros", "rt", "sync"] }
+
+[lints]
+workspace = true
