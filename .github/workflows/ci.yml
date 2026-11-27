@@ -9,8 +9,8 @@ on:
 
 env:
   # Use the sibling revisions exercised together in platform acceptance.
-  HYVE_REF: ab3b833cdf5bfd5ea32d5f20b92fc198447d70d8
-  SERGE_REF: 1c6d1e2cba14acb2db8b675afadd5c2c9a404dad
+  HYVE_REF: 3870159a603b2acfe5e18382d83cdca2fe7f4bb5
+  SERGE_REF: 41bed229409b2623851084c1b2669bba533772d2
   CARGO_TERM_COLOR: always
   # Must match `rust-version` in Cargo.toml (hyperish/docs 05-development-rules.md §8).
   MSRV: "1.94"
